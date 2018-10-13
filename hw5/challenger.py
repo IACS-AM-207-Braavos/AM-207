@@ -98,12 +98,13 @@ def sample_theta_prior_generic(theta_1_mean, theta_1_std, theta_2_mean, theta_2_
     # Return the instance with bound parameter values
     return sample_instance
 
-# Selected parameters for priors of theta_1 and theta_2 match the output of 
-# the logistic regression estimate in statsmodels
+# Selected parameters for priors of theta_1 and theta_2 are derived from the output of 
+# the logistic regression estimate in statsmodels; 
+# keep the means unchanged but inflate the standard deviations by 2.0x
 theta_1_mean = 15.04
-theta_1_std = 7.38
+theta_1_std = 7.38*2
 theta_2_mean = -0.23
-theta_2_std = 0.108
+theta_2_std = 0.108*2
 
 # Create instances of the prior and its sampling function with bound parameter values
 theta_prior = theta_prior_generic(theta_1_mean, theta_1_std, theta_2_mean, theta_2_std)
