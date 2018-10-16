@@ -211,7 +211,7 @@ def gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, 
 lambda_init = np.array([0.0, 0.0])
 step_size = 0.01
 max_iterations=10000
-precision=1e-6
+precision=1e-12
 gd = gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss_func)
 # Unpack answer
 lambdas = gd['lambdas']
@@ -225,7 +225,17 @@ print(f'lambda1 = {lambda1:0.6f}, lambda2 = {lambda2:0.6f}')
 # *************************************************************************************************
 # 2.3 For your implementation in 2.2, create a plot of loss vs iteration. 
 # Does your descent algorithm comverge to the right values of  λ ? At what point does your implementation converge?
-    
+
+plot_n = np.arange(num_iters+1)
+fig, ax = plt.subplots()
+fig.set_size_inches([16, 8])
+ax.set_title('Loss Function During Gradient Descent')
+ax.set_xlabel('Iteration Number')
+ax.set_ylabel('Loss Function')
+ax.plot(plot_n[0:100], history[0:100], linewidth=4)
+ax.grid()
+plt.show()
+
 
 
 # *************************************************************************************************
@@ -261,7 +271,7 @@ def stochastic_gradient_descent():
     'history' -- the associated value is a numpy array with shape (n_iterations,) containing a 
                  history of the calculated value of the loss function at each iteration        
     """
-    pass
+
 
 
 
