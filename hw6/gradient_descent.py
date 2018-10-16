@@ -214,28 +214,27 @@ max_iterations=10000
 precision=1e-12
 gd = gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss_func)
 # Unpack answer
-lambdas = gd['lambdas']
-history = gd['history']
-lambda1, lambda2 = lambdas
-num_iters = len(history)-1
-print(f'Completed gradient descent to precision {precision:0.2e} in {num_iters} steps.')
-print(f'lambda1 = {lambda1:0.6f}, lambda2 = {lambda2:0.6f}')
+lambdas_gd = gd['lambdas']
+history_gd = gd['history']
+lambda1_gd, lambda2_gd = lambdas_gd
+num_iters_gd = len(history_gd)-1
+print(f'Completed gradient descent to precision {precision:0.2e} in {num_iters_gd} steps.')
+print(f'lambda1 = {lambda1_gd:0.6f}, lambda2 = {lambda2_gd:0.6f}')
 
 
 # *************************************************************************************************
 # 2.3 For your implementation in 2.2, create a plot of loss vs iteration. 
 # Does your descent algorithm comverge to the right values of  λ ? At what point does your implementation converge?
 
-plot_n = np.arange(num_iters+1)
+plot_n_gd = np.arange(num_iters_gd+1)
 fig, ax = plt.subplots()
 fig.set_size_inches([16, 8])
 ax.set_title('Loss Function During Gradient Descent')
 ax.set_xlabel('Iteration Number')
 ax.set_ylabel('Loss Function')
-ax.plot(plot_n[0:100], history[0:100], linewidth=4)
+ax.plot(plot_n_gd[0:100], history_gd[0:100], linewidth=4)
 ax.grid()
 plt.show()
-
 
 
 # *************************************************************************************************
@@ -244,7 +243,7 @@ plt.show()
 # L for the given data. Your implementation should a stored in a function named stochastic_gradient_descent. 
 # stochastic_gradient_descent should take the following parameters (n represents the number of data points):
 
-def stochastic_gradient_descent():
+def stochastic_gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss):
     """
     Stochastic Gradient Descent algorithm specialized for this problem.
 
@@ -272,24 +271,104 @@ def stochastic_gradient_descent():
                  history of the calculated value of the loss function at each iteration        
     """
 
+    # Initialize lambdas to lambda_init
+    lambdas = lambda_init
+    # Initialize history to have size max_iterations
+    history = np.zeros(max_iterations+1)
+    # Set shift size h for numerical derivatives of lambda1 and lambda2; use sqrt(machine_epsilon)
+    h: float = 2**-26
+    two_h: float = 2*h
+    # Vectorized shifts to lambdas
+    h_lam1 = np.array([h, 0])
+    h_lam2 = np.array([0, h])
+    # Initialize loss_prev to the loss on the initial parameter values
+    loss_prev: float = loss(X_data, lambdas)
+    history[0] = loss_prev
+    # Shape of data
+    m, n = X_data.shape
+    # Copy X so we don't re-order it when shuffling
+    X = X_data.copy()
+    # Perform up to max_iterations steps of gradient descent
+    for epoch in range_inc(max_iterations):
+        # Shuffle the data randomly for this epoch
+        np.random.shuffle(X)
+        # Iterate over individual points in X
+        for i in range(m):
+            # Extract the ith row
+            row = X[i, :].reshape(-1,2)
+            # Compute partial of loss w.r.t lambda1 and lambda2
+            dL_dlam1 = (loss_func(row, lambdas + h_lam1) - loss_func(row, lambdas - h_lam1)) / two_h
+            dL_dlam2 = (loss_func(row, lambdas + h_lam2) - loss_func(row, lambdas - h_lam2)) / two_h
+            # Vector gradient dL_dlam
+            grad = np.array([dL_dlam1, dL_dlam2])
+            # Subtract a multiple of the gradient from lambdas
+            lambdas = lambdas - step_size * grad
+        # Compute the current loss
+        loss_curr = loss(X_data, lambdas)
+        # Save the current loss in the history
+        history[epoch] = loss_curr
+        # Compute the change in the loss function 
+        loss_change = loss_prev - loss_curr
+        # Update loss_prev
+        loss_prev: float = loss_curr
+        # Was the improvement below the precision? Then we can terminate
+        if loss_change < precision:
+            break
+    # Prune history to the number of steps taken
+    history = history[0:epoch+1]
+    # Create the answer dictionary and return it
+    sgd = {'lambdas': lambdas, 
+          'history' : history}
+    return sgd
 
+# Run the gradient descent starting at [0, 0] with a learning rate of 0.01
+lambda_init = np.array([0.0, 0.0])
+step_size = 0.01
+max_iterations=300
+precision=1e-6
+if 'sgd' not in globals():
+    sgd = stochastic_gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss_func)
+# Unpack answer
+lambdas_sgd = sgd['lambdas']
+history_sgd = sgd['history']
+lambda1_sgd, lambda2_sgd = lambdas_sgd
+num_iters_sgd = len(history_sgd)-1
+print(f'Completed stochastic gradient descent to precision {precision:0.2e} in {num_iters_sgd} steps.')
+print(f'lambda1 = {lambda1:0.6f}, lambda2 = {lambda2:0.6f}')
 
 
 # *************************************************************************************************
 # 2.5 For your implementation in 2.4, create a plot of loss vs iteration. 
 # Does your descent algorithm comverge to the right values of λ ? At what point does your implementation converge?
     
+plot_n_sgd = np.arange(num_iters_sgd+1)
+fig, ax = plt.subplots()
+fig.set_size_inches([16, 8])
+ax.set_title('Loss Function During Stochastic Gradient Descent')
+ax.set_xlabel('Iteration Number')
+ax.set_ylabel('Loss Function')
+ax.plot(plot_n_sgd[0:100], history_sgd[0:100], linewidth=4)
+ax.grid()
+plt.show()
+
 
 # *************************************************************************************************
-# 2.6 Compare the average time it takes to update the parameter estimation in each iteration of the two implementations. Which method is faster? Briefly explain why this result should be expected.
+# 2.6 Compare the average time it takes to update the parameter estimation in each iteration of the two 
+# implementations. Which method is faster? Briefly explain why this result should be expected.
+
+# See notebook
+
+# *************************************************************************************************
+# 2.7 Compare the number of iterations it takes for each algorithm to obtain an estimate accurate to 1e-3. 
+# You may wish to set a cap for maximum number of iterations. 
+# Which method converges to the optimal point in fewer iterations? Briefly explain why this result should be expected.
 
 
 # *************************************************************************************************
-# 2.7 Compare the number of iterations it takes for each algorithm to obtain an estimate accurate to 1e-3. You may wish to set a cap for maximum number of iterations. Which method converges to the optimal point in fewer iterations? Briefly explain why this result should be expected.
-
-
-# *************************************************************************************************
-# 2.8 Compare the performance of stochastic gradient descent on our loss function and dataset for the following learning rates: [10, 1, 0.1, 0.01, 0.001, 0.0001]. Based on your observations, briefly describe the effect of the choice of learning rate on the performance of the algorithm.
+# 2.8 Compare the performance of stochastic gradient descent on our loss function and dataset for the 
+# following learning rates: [10, 1, 0.1, 0.01, 0.001, 0.0001]. 
+# Based on your observations, briefly describe the effect of the choice of learning rate 
+# on the performance of the algorithm.
 
 
 # *************************************************************************************************
