@@ -17,9 +17,9 @@ from time import time
 
 # import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.mlab as mlab
-from matplotlib import cm
-import pandas as pd
+# import matplotlib.mlab as mlab
+# from matplotlib import cm
+# import pandas as pd
 
 from am207_utils import plot_style, arange_inc, funcType
 
@@ -103,7 +103,7 @@ b: float = 9.0
 # Calculate the exact answer using scipy.integrate.quad
 fh = lambda x : f(x) * h(x)
 exp_exact, tol_exact = quad(fh, a, b)
-print(f'The exact answer with scipy.integrate.quad is {exp_exact} to a tolerance of {tol_exact:0.3e}.')
+print(f'The exact answer with scipy.integrate.quad is {exp_exact:0.8f} to a tolerance of {tol_exact:0.3e}.')
 
 # *************************************************************************************************
 # 1.1. Rejection sampling with a normal proposal distribution and appropriately chosen parameters 
@@ -115,16 +115,17 @@ plot_f = f(plot_x)
 
 # Create a proposal distribution by hand by looking at the chart
 # Experiment to get M as small as possible
-mu = 5.8
-sigma: float = np.std(plot_x)*0.9
+mu1 = 5.8
+sigma1: float = np.std(plot_x)*0.9
 # Proposal distribution g(x) (NOT majorized)
-g: funcType = lambda x : norm.pdf(x, loc=mu, scale=sigma)
-plot_g = g(plot_x)
-M: float = np.max(plot_f / plot_g)*1.01
-plot_g_maj = M * plot_g
-print(f'mu={mu:0.6f}, sigma={sigma:0.6f}, M={M:0.6f}')
+g1: funcType = lambda x : norm.pdf(x, loc=mu1, scale=sigma1)
+plot_g1 = g1(plot_x)
+M1: float = np.max(plot_f / plot_g1)*1.01
+plot_g1_maj = M1 * plot_g1
+print(f'Proposal Distribution and Majorizer for rejection sampling.')
+print(f'mu={mu1:0.6f}, sigma={sigma1:0.6f}, M={M1:0.6f}')
 # Define the sampling distribution for the chosen proposal distribution g(x)
-g_sample = lambda : norm.rvs(loc=mu, scale=sigma)
+g1_sample = lambda : norm.rvs(loc=mu1, scale=sigma1)
 
 # Plot the PDF f_X(x) and the majorizing distribution Mg(x)
 fig, ax = plt.subplots()
@@ -134,13 +135,14 @@ ax.set_xlabel('x')
 ax.set_ylabel('$f_X(x)$')
 ax.set_xlim([1,9])
 ax.plot(plot_x, plot_f, label='PDF')
-ax.plot(plot_x, plot_g_maj, label='Mg(x)')
+ax.plot(plot_x, plot_g1_maj, label='Mg(x)')
 ax.legend()
 ax.grid()
 plt.show()
 
  
 # *************************************************************************************************
+# 1.1 Compute E_f[h] using rejection sampling from a proposal distribution
 def rejection_sample_proposal(f: funcType, g: funcType, g_sample: funcType, M: float, size: int):
     """
     Perform rejection sampling: 
@@ -193,7 +195,7 @@ sample_size: int = 10**4
 # Draw a sample of x's from the normal proposal distribution
 if 'x_samples_rs' not in globals():
     t0 = time()
-    x_samples_rs, attempts = rejection_sample_proposal(f, g, g_sample, M, sample_size)
+    x_samples_rs, attempts = rejection_sample_proposal(f, g1, g1_sample, M1, sample_size)
     t1 = time()
     elapsed = t1 - t0
     print(f'Generated {sample_size} samples in {attempts} attempts using rejection sampling; {elapsed:0.2f} seconds.')
@@ -210,14 +212,27 @@ print(f'Expectation of h(x) using Rejection Sampling: {exp_h_rs:0.6f}.  '
 # *************************************************************************************************
 # 1.2. Importance sampling with a uniform proposal distribution
 
-# Draw samples uniformly on [a, b]; we keep them because we're doing importance sampling
+# Define uniform proposal distribution's density (will only be used on [a, b]
+def g_unif(x):
+    if isinstance(x, np.ndarray):
+        y = np.zeros_like(x)
+        mask = (a <= x) & (x <= b)
+        y[mask] = 1.0 / (b-a)
+    if isinstance(x, float) or isinstance(x, int):
+        if a <= x and x <= b:
+            return 1.0 / (b-a)
+        else:
+            return 0
+
+
+# Draw samples uniformly on [a, b]; we keep them all because we're doing importance sampling
 x_samples_unif = np.random.uniform(low=a, high=b, size=sample_size)
 print(f'Drew {sample_size} random samples on uniform proposal distribution.')
 # The importance weights are just the ratio f(x) / g(x) on each sample
 # Here the proposal g(x) is uniform, so g(x) = 1/(b-a)
-wts_un = f(x_samples_unif) * (b-a)
+wts_unif = f(x_samples_unif) * (b-a)
 # Compute E_f[H] with these samples and importance weights; report results
-exp_h_unif = expectation_mc(h, x_samples_unif, wts_un)
+exp_h_unif = expectation_mc(h, x_samples_unif, wts_unif)
 err_unif: float = np.abs(exp_h_unif - exp_exact)
 print(f'Expectation of h(x) using Uniform Sampling and Importance Weights: {exp_h_unif:0.6f}; '
       f'Error = {err_unif:0.2e}\n')
@@ -233,7 +248,7 @@ plot_fh = plot_f * plot_h
 mu2 = 5.8
 sigma2: float = np.std(plot_x)*0.9
 # Proposal distribution g(x) (NOT majorized)
-g2: funcType = lambda x : norm.pdf(x, loc=mu, scale=sigma)
+g2: funcType = lambda x : norm.pdf(x, loc=mu2, scale=sigma2)
 plot_g2 = g2(plot_x)
 M2: float = np.max(plot_fh / plot_g2)*1.01
 plot_g2_maj = M2 * plot_g2
@@ -261,7 +276,7 @@ wts_norm = f(x_samples_norm) / g2(x_samples_norm)
 # Compute the E_f[H] on these samples and importance weights; report results
 exp_h_norm = expectation_mc(h, x_samples_norm, wts_norm)
 err_norm = np.abs(exp_h_norm - exp_exact)
-print(f'Expectation of h(x) using Normal Proposal Distribuion & Importance Weights: {exp_h_norm:0.6f};'
+print(f'Expectation of h(x) using Normal Proposal Distribution & Importance Weights: {exp_h_norm:0.6f}; '
       f'Error {err_norm:0.2e}')
 
 
@@ -269,8 +284,76 @@ print(f'Expectation of h(x) using Normal Proposal Distribuion & Importance Weigh
 # 1.4. So far (in HWs 5 and 6) we've computed estimates of  𝔼[h(X)]  for the following list of methods:
 
 # (a) Inverse Transform Sampling
-# (b) Rejection Sampling with a uniform proposal distribution (rejection sampling in a rectangular box 
-# (c) with uniform probability of sampling any x)
-# (d) Rejection sampling with a normal proposal distribution and appropriately chosen parameters (aka rejection on steroids)
-# (e) Importance sampling with a uniform proposal distribution
+# (b) Rejection Sampling with a uniform proposal distribution 
+#     (rejection sampling in a rectangular box with uniform probability of sampling any x)
+# (c) Rejection sampling with a normal proposal distribution and appropriately chosen parameters (aka rejection on steroids)
+# (d) Importance sampling with a uniform proposal distribution
 # (e) Importance sampling with a normal proposal distribution and appropriately chosen parameters.
+
+# Compute the variance of each estimate of  𝔼[h(X)] you calculated in this list. 
+# Which sampling methods and associated proposal distributions would you expect based on discussions from lecture 
+# to have resulted in lower variances? How well do your results align with these expectations?
+
+# Lecture 10, p. 18: 
+# For "regular" sampling, V_hat = V_f[h(x)] / N
+# For importance sampling, V_hat = V_g[w(x) h(x)] / N
+
+def weighted_variance(x: np.ndarray, wts: np.ndarray):
+    """Compute the variance of an array with weights"""
+    # Compute the weighted average
+    wtd_avg = np.average(a=x, weights=wts)
+    # Compute the difference to the weighted average
+    dx = x - wtd_avg
+    # The weighted variance is the weighted average of dx*dx    
+    return np.average(a=dx*dx, weights=wts)
+
+def exp_mc_var(h: funcType, x_samples):
+    """Esimate variance of h(x) on sampled x."""
+    # Number of samples
+    N: int = x_samples.shape[0]
+    # Compute the expected variance of h(x) with probability f(x): V_f[h(x)]
+    h_x: np.ndarray = h(x_samples)
+    f_x: np.ndarray = f(x_samples)
+    h_var: float = weighted_variance(h_x, f_x)
+    # Return the sample variance over N
+    return h_var / N
+
+
+def exp_mc_var_wtd(h: funcType, g: funcType, x_samples, wts):
+    """Esimate variance of h(x) on sampled x."""
+    # Number of samples
+    N: int = x_samples.shape[0]
+    # Compute the expected variance of w(x)h(x) with probability g(x): V_g[w(x)h(x)]
+    wh_x: np.ndarray = wts * h(x_samples)
+    g_x: np.ndarray = g(x_samples)
+    wh_var: float = weighted_variance(wh_x, g_x)
+    # Return the sample variance over N
+    return wh_var / N
+
+
+# *************************************************************************************************
+print(f'\nExpected variance on MC integral with 5 sampling methods and {sample_size} samples.')
+
+# The expected variance and standard deviation for all three sampling based approaches.
+exp_var_samp = exp_mc_var(h, x_samples_norm)
+exp_std_samp = sqrt(exp_var_samp)
+# Report results
+print(f'Estimated variance for all three sampling estimates with {sample_size} samples:')
+print(f'Estimated variance = {exp_var_samp:0.3e}, standard deviation = {exp_std_samp:0.3e}.')
+
+# Exact answer
+var_func = lambda x : (h(x)-exp_exact)**2
+var_func_f = lambda x : var_func(x) * f(x)
+exp_var_exact = quad(var_func_f, a, b)[0] / sample_size
+exp_std_exact = sqrt(exp_var_exact)
+print(f'Estimated variance with integrate.quad = {exp_var_exact:0.3e}, standard deviation = {exp_std_exact:0.3e}')
+
+# (d) Importance Sampling with unifrom proposal distribution
+var_imp_unif = exp_mc_var_wtd(h, g_unif, x_samples_unif, wts_unif)
+std_imp_unif = sqrt(var_imp_unif)
+print(f'Importance Weighting with Uniform Proposal: variance = {var_imp_unif:0.3e}, std = {std_imp_unif:0.3e}.')
+
+# (e) Importance Sampling with normal proposal distribution
+var_imp_norm = exp_mc_var_wtd(h, g2, x_samples_norm, wts_norm)
+std_imp_norm = sqrt(var_imp_unif)
+print(f'Importance Weighting with Normal Proposal: variance = {var_imp_norm:0.3e}, std = {std_imp_norm:0.3e}.')

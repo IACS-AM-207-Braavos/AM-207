@@ -200,9 +200,10 @@ def samples_x_reject(f_X, size, a: float, b: float, y_max: float):
     # Return the list of samples as well as the number of attempts
     return x_samples, attempts
 
+# Get the CDF and inverse CDF for the given f
+F_X, F_X_inv = cdf_and_inverse(f_X, 1.0, 9.0, 0.01)
+
 def main_2():
-    # Get the CDF and inverse CDF for the given f
-    F_X, F_X_inv = cdf_and_inverse(f_X, 1.0, 9.0, 0.01)
     # Generate 1,000,000 samples for x
     sample_size: int = 10**6
     x_samples_its = samples_x_inv_trans(F_X_inv, size=sample_size)
