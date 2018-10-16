@@ -26,8 +26,12 @@ import numpy as np
 from numpy import exp
 import pandas as pd
 import matplotlib.pyplot as plt
-from am207_utils import range_inc
+from time import time
+from am207_utils import range_inc, plot_style
+from typing import List
 
+# Set plot style
+plot_style()
 
 # *************************************************************************************************
 # 2.1. Construct an appropriate visualization of the loss function for the given data. 
@@ -140,7 +144,7 @@ plt.show()
 # Your implementation should be stored in a function named gradient_descent.  
 # gradient_descent should take the following parameters (n represents the number of data points):
 
-def gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss):
+def gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision, loss):
     """
     Gradient Descent algorithm specialized for this problem.
 
@@ -197,6 +201,8 @@ def gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, 
         loss_change = loss_prev - loss_curr
         # Update loss_prev
         loss_prev: float = loss_curr
+        # Update step_size using scale
+        step_size *= scale
         # Was the improvement below the precision? Then we can terminate
         if loss_change < precision:
             break
@@ -207,12 +213,18 @@ def gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, 
           'history' : history}
     return gd
 
+# *************************************************************************************************
+# 2.2
 # Run the gradient descent starting at [0, 0] with a learning rate of 0.01
 lambda_init = np.array([0.0, 0.0])
 step_size = 0.01
+scale = 1.0
 max_iterations=10000
 precision=1e-12
-gd = gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss_func)
+t0 = time()
+gd = gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision, loss_func)
+t1 = time()
+elapsed_gd = (t1-t0)
 # Unpack answer
 lambdas_gd = gd['lambdas']
 history_gd = gd['history']
@@ -220,6 +232,7 @@ lambda1_gd, lambda2_gd = lambdas_gd
 num_iters_gd = len(history_gd)-1
 print(f'Completed gradient descent to precision {precision:0.2e} in {num_iters_gd} steps.')
 print(f'lambda1 = {lambda1_gd:0.6f}, lambda2 = {lambda2_gd:0.6f}')
+print(f'Elapsed time {elapsed_gd:0.2f} seconds, {elapsed_gd/num_iters_gd:0.2e} per second.')
 
 
 # *************************************************************************************************
@@ -243,7 +256,7 @@ plt.show()
 # L for the given data. Your implementation should a stored in a function named stochastic_gradient_descent. 
 # stochastic_gradient_descent should take the following parameters (n represents the number of data points):
 
-def stochastic_gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss):
+def stochastic_gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision, loss):
     """
     Stochastic Gradient Descent algorithm specialized for this problem.
 
@@ -311,6 +324,8 @@ def stochastic_gradient_descent(lambda_init, X_data, step_size, max_iterations, 
         loss_change = loss_prev - loss_curr
         # Update loss_prev
         loss_prev: float = loss_curr
+        # Update step_size using scale
+        step_size *= scale
         # Was the improvement below the precision? Then we can terminate
         if loss_change < precision:
             break
@@ -321,13 +336,19 @@ def stochastic_gradient_descent(lambda_init, X_data, step_size, max_iterations, 
           'history' : history}
     return sgd
 
+# *************************************************************************************************
+# 2.4
 # Run the gradient descent starting at [0, 0] with a learning rate of 0.01
 lambda_init = np.array([0.0, 0.0])
 step_size = 0.01
+scale = 1.0
 max_iterations=300
 precision=1e-6
 if 'sgd' not in globals():
-    sgd = stochastic_gradient_descent(lambda_init, X_data, step_size, max_iterations, precision, loss_func)
+    t0 = time()
+    sgd = stochastic_gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision, loss_func)
+    t1 = time()
+    elapsed_sgd = t1 - t0
 # Unpack answer
 lambdas_sgd = sgd['lambdas']
 history_sgd = sgd['history']
@@ -335,6 +356,7 @@ lambda1_sgd, lambda2_sgd = lambdas_sgd
 num_iters_sgd = len(history_sgd)-1
 print(f'Completed stochastic gradient descent to precision {precision:0.2e} in {num_iters_sgd} steps.')
 print(f'lambda1 = {lambda1:0.6f}, lambda2 = {lambda2:0.6f}')
+print(f'Elapsed time {elapsed_sgd:0.2f} seconds, {elapsed_sgd/num_iters_gd:0.2e} per second.')
 
 
 # *************************************************************************************************
@@ -363,12 +385,46 @@ plt.show()
 # You may wish to set a cap for maximum number of iterations. 
 # Which method converges to the optimal point in fewer iterations? Briefly explain why this result should be expected.
 
+# Number of iterations for 3 decimal places of precision in the loss function
+precision_3dp = 1e-3
+gd_3dp = gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision_3dp, loss_func)
+if 'sgd_3dp' not in globals():
+    sgd_3dp = stochastic_gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision_3dp, loss_func)
+# Report results
+num_iters_gd_3dp = len(gd['history'])
+num_iters_sgd_3dp = len(sgd['history'])
+print(f'Number of iterations for 3 decimal places of accuracy:')
+print(f'Gradient Descent           : {num_iters_gd_3dp} iterations')
+print(f'Stochastic Gradient Descent: {num_iters_sgd_3dp} iterations')
 
 # *************************************************************************************************
 # 2.8 Compare the performance of stochastic gradient descent on our loss function and dataset for the 
 # following learning rates: [10, 1, 0.1, 0.01, 0.001, 0.0001]. 
 # Based on your observations, briefly describe the effect of the choice of learning rate 
 # on the performance of the algorithm.
+
+# List of learning rates to try
+step_sizes  = np.array([10.0, 1.0, 0.1, 0.01, 0.001, 0.0001])
+# List of sgd objects and iteration counts
+sgds: List[dict] = list()
+num_iters_by_lr = np.zeros_like(step_sizes)
+# Try each step size on SGD; count number of iterations for 3 decimal places
+if not bool(sgds):
+    for i, step_size in enumerate(step_sizes):
+        sgd_curr = stochastic_gradient_descent(lambda_init, X_data, step_size, 
+                                               scale, max_iterations, precision_3dp, loss_func)
+        num_iters_by_lr[i] = len(sgd_curr['history'])
+
+# Plot number of iterations vs. learning rate
+fig, ax = plt.subplots()
+fig.set_size_inches([16, 8])
+ax.set_title('Number of Iterations vs. Learning Rate in SGD')
+ax.set_xlabel('Step Size (Learning Rate), log scale')
+ax.set_ylabel('Number of Iterations for 0.001 Loss Tolerance')
+ax.set_xscale('log')
+ax.plot(step_sizes, num_iters_by_lr)
+ax.grid()
+plt.show()
 
 
 # *************************************************************************************************
