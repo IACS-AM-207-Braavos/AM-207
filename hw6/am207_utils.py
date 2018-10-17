@@ -8,7 +8,12 @@ Fri Sep 21 17:16:18 2018
 
 import numpy as np
 import matplotlib as mpl
-from typing import Callable
+import pickle
+from typing import Dict, Callable
+
+# *************************************************************************************************
+# Type aliases
+funcType = Callable[[float], float]
 
 # *************************************************************************************************
 def plot_style() -> None:
@@ -45,5 +50,17 @@ def arange_inc(x: float, y: float = None, z: float = None) -> np.ndarray:
 
 
 # *************************************************************************************************
-# Type aliases
-funcType = Callable[[float], float]
+def load_vartbl(fname: str) -> Dict:
+    """Load a dictionary of variables from a pickled file"""
+    try:
+        with open(fname, 'rb') as fh:
+            vartbl = pickle.load(fh)
+    except:
+        vartbl = dict()
+    return vartbl
+
+
+def save_vartbl(vartbl: Dict, fname: str) -> None:
+    """Save a dictionary of variables to the given file with pickle"""
+    with open(fname, 'wb') as fh:
+        pickle.dump(vartbl, fh)
