@@ -27,7 +27,9 @@ from numpy import exp
 import pandas as pd
 import matplotlib.pyplot as plt
 from time import time
-from am207_utils import range_inc, plot_style
+import pickle
+import os
+from am207_utils import range_inc, arange_inc, plot_style
 from typing import List
 
 # Set plot style
@@ -117,12 +119,19 @@ grid_size: int = 200
 lambda1_samp = np.linspace(-10, 10, grid_size)
 lambda2_samp = np.linspace(-10, 10, grid_size)
 lambda1_grid, lambda2_grid = np.meshgrid(lambda1_samp, lambda2_samp)
+
 # Grid of the total loss function
-if 'loss_grid' not in globals():
+fname = 'dg_loss_grid.pickle'
+try:
+    with open(fname, 'rb') as fh:
+        loss_grid = pickle.load(fh)
+except:    
     loss_grid = np.zeros((grid_size, grid_size))
     for i, lambda1 in enumerate(lambda1_samp):
         for j, lambda2 in enumerate(lambda2_samp):
             loss_grid[i,j] = L(lambda1, lambda2)
+    with open(fname, 'wb') as fh:
+        pickle.dump(loss_grid, fh)
 
 # Plot the loss function
 fig, ax = plt.subplots()
@@ -344,11 +353,22 @@ step_size = 0.01
 scale = 1.0
 max_iterations=300
 precision=1e-6
-if 'sgd' not in globals():
-    t0 = time()
-    sgd = stochastic_gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision, loss_func)
-    t1 = time()
-    elapsed_sgd = t1 - t0
+
+# Load the sgd if present, otherwise compute it
+fname = 'gd_sgd.pickle'
+with open(fname, 'rb') as fh:
+    try:
+        sgd = pickle.load(fh)
+        elapsed_sgd = pickle.load(fh)
+    except:
+        t0 = time()
+        sgd = stochastic_gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision, loss_func)
+        t1 = time()
+        elapsed_sgd = t1 - t0
+        with open(fname, 'wb') as fh:
+            pickle.dump(sgd, fh)
+            pickle.dump(elapsed_sgd, fh)
+        
 # Unpack answer
 lambdas_sgd = sgd['lambdas']
 history_sgd = sgd['history']
@@ -388,8 +408,16 @@ plt.show()
 # Number of iterations for 3 decimal places of precision in the loss function
 precision_3dp = 1e-3
 gd_3dp = gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision_3dp, loss_func)
-if 'sgd_3dp' not in globals():
-    sgd_3dp = stochastic_gradient_descent(lambda_init, X_data, step_size, scale, max_iterations, precision_3dp, loss_func)
+# Load gradient descent calculations to 3 decimal places if present, otherwise compute it
+fname = 'gd_gd_3dp.pickle'
+try:
+    with open(fname, 'rb') as fh:
+        std_3dp = pickle.load(fh)
+except:
+    sgd_3dp = stochastic_gradient_descent(lambda_init, X_data, step_size, scale, 
+                                          max_iterations, precision_3dp, loss_func)
+    with open(fname, 'wb') as fh:
+        pickle.dump(sgd_3dp, fh)
 # Report results
 num_iters_gd_3dp = len(gd['history'])
 num_iters_sgd_3dp = len(sgd['history'])
@@ -410,7 +438,14 @@ num_step_sizes = len(step_sizes)
 lambda_init = np.array([0, 0])
 # Set max_iterations for this experiment at 50 so runs don't take too long
 max_iterations_sgd = 50
-if 'sgds_by_lr' not in globals():
+# Load SGD by learning rate if present, otherwise compute it
+fname = 'gd_by_lr.pickle'
+try:
+    with open(fname, 'rb') as fh:
+        sgds_by_lr = pickle.load(fh)
+        num_iters_by_lr = pickle.load(fh)
+        loss_by_lr = pickle.load(fh)
+except:       
     # List of sgd objects and iteration counts
     sgds_by_lr: List[dict] = num_step_sizes * [dict()]
     num_iters_by_lr = np.zeros(num_step_sizes)
@@ -422,6 +457,10 @@ if 'sgds_by_lr' not in globals():
         sgds_by_lr[i] = sgd_curr
         num_iters_by_lr[i] = len(sgd_curr['history'])-1
         loss_by_lr[i] = sgd_curr['history'][-1]
+    with open(fname, 'wb') as fh:
+        pickle.dump(sgds_by_lr, fh)
+        pickle.dump(num_iters_by_lr, fh)
+        pickle.dump(loss_by_lr, fh)
 
 # Plot number of iterations vs. learning rate
 fig, ax = plt.subplots()
@@ -464,7 +503,12 @@ max_iterations = 100
 # Set a very tight precision so we won't exit early
 precision_tight = 1e-16
 # Test whether this has been done on a prior run in this session because it's slow
-if 'gds_by_start' not in globals():
+fname = 'gd_by_start'
+try:
+    with open(fname, 'rb') as fh:
+        gds_by_start = pickle.load(fh)
+        sgds_by_start = pickle.load(fh)
+except:
     # Create lists to store the results
     gds_by_start = num_starts * [dict()]
     sgds_by_start = num_starts * [dict()]
@@ -472,10 +516,38 @@ if 'gds_by_start' not in globals():
     for i, lambda_init in enumerate(lambdas_init):
         # Run both gradient descent algorithms with this starting point
         gd_curr = gradient_descent(lambda_init, X_data, step_size, 
-                                   scale, max_iterations_sgd, precision_tight, loss_func)
+                                   scale, max_iterations, precision_tight, loss_func)
         sgd_curr = stochastic_gradient_descent(lambda_init, X_data, step_size, 
-                                               scale, max_iterations_sgd, precision_tight, loss_func)
+                                               scale, max_iterations, precision_tight, loss_func)
         # Save the two models
         gds_by_start[i] = gd_curr
         sgds_by_start[i] = sgd_curr
+    with open(fname, 'wb') as fh:
+        pickle.dump(gds_by_start, fh)
+        pickle.dump(sgds_by_start, fh)
+            
 
+# Loss function vs. iteration iteration for each starting value
+loss_gd_by_start = num_starts * [np.array([])]
+loss_sgd_by_start = num_starts * [np.array([])]
+
+for i, lambda_init in enumerate(lambdas_init):
+    loss_gd_by_start[i] = gds_by_start[i]['history']
+    loss_sgd_by_start[i] = sgds_by_start[i]['history']
+
+# Plot loss vs. iteration for each start
+nn = arange_inc(1, max_iterations)
+for lambda_init in lambdas_init:
+    lambda1, lambda2 = lambda_init
+    fig, ax = plt.subplots()
+    ax.set_title(f'Loss vs. Iteration Number Starting at $\lambda_1=${lambda1:0.3f}, $\lambda_2={lambda2:0.1f}')
+    ax.set_xlabel('Iteration Number')
+    ax.set_ylabel('Loss Function')
+    # plot_loss_gd = loss_gd_by_start[i]
+    # plot_loss_sgd = loss_sgd_by_start[i]
+    ax.plot(nn, loss_gd_by_start[i], label='GD')
+    ax.plot(nn, loss_sgd_by_start[i], label='SGD')
+    ax.legend()
+    ax.grid()
+    plt.show()
+    
