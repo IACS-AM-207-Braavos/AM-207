@@ -107,6 +107,18 @@ def L(lambda1: float, lambda2: float) -> float:
     return loss_func(X_data, lambdas)
 
 
+def L_grad(lambda1: float, lambda2: float) -> np.ndarray:
+    """Compute the gradient of the loss function L"""
+    # Set shift size h for numerical derivatives of lambda1 and lambda2; use sqrt(machine_epsilon)
+    h: float = 2**-26
+    two_h: float = 2*h
+    # Compute partial of loss w.r.t lambda1 and lambda2
+    dL_dlam1 = (L(lambda1 + h, lambda2) - L(lambda1 - h, lambda2)) / two_h
+    dL_dlam2 = (L(lambda1, lambda2 + h) - L(lambda1, lambda2 + h)) / two_h
+    # Vector gradient dL_dlam
+    grad = np.array([dL_dlam1, dL_dlam2])
+    return grad
+
 # *************************************************************************************************
 # 2.1 Visualize the loss function
 
@@ -129,14 +141,14 @@ except:
     loss_grid = np.zeros((grid_size, grid_size))
     for i, lambda1 in enumerate(lambda1_samp):
         for j, lambda2 in enumerate(lambda2_samp):
-            loss_grid[i,j] = L(lambda1, lambda2)
+            loss_grid[j,i] = L(lambda1, lambda2)
     vartbl['loss_grid'] = loss_grid
     save_vartbl(vartbl, fname)
 
-# Plot the loss function
+# Plot the loss function - large scale overview
 fig, ax = plt.subplots()
 fig.set_size_inches([16, 8])
-ax.set_title('Loss Function on Entire Data Set')
+ax.set_title('Loss Function on Entire Data Set - Overview')
 ax.set_xlabel(r'$\lambda_1$')
 ax.set_ylabel(r'$\lambda_2$')
 cs = ax.contour(lambda1_grid, lambda2_grid, loss_grid, linewidths=8)
@@ -146,7 +158,20 @@ ax.legend()
 ax.grid()
 plt.show()
 
-
+# Plot the loss function - zoom in on important details
+fig, ax = plt.subplots()
+fig.set_size_inches([16, 8])
+ax.set_title('Loss Function on Entire Data Set - Zoom')
+ax.set_xlabel(r'$\lambda_1$')
+ax.set_ylabel(r'$\lambda_2$')
+ax.set_xlim([-5,5])
+ax.set_ylim([-5,5])
+cs = ax.contour(lambda1_grid, lambda2_grid, loss_grid, levels=np.arange(-8, 12, 1), linewidths=4)
+ax.plot(lambda1_min, lambda2_min, label='Min', marker='o', markersize=12, linewidth=0, color='r')
+fig.colorbar(cs, ax=ax)
+ax.legend()
+ax.grid()
+plt.show()
 # *************************************************************************************************
 # 2.2. Choose an appropriate learning rate from [10, 1, 0.1, 0.01, 0.001, 0.0001] and 
 # use that learning rate to implement gradient descent. Use your implementation to minimize L for the given data. 
@@ -500,6 +525,8 @@ lambdas_init = [np.array([x, 0.0]) for x in lambda1s_init]
 num_starts = len(lambdas_init)
 # Use a consistent benchmark for the number of steps
 max_iterations = 100
+# Set a learning rate of 1.0 here
+step_size = 0.1
 # Set a very tight precision so we won't exit early
 precision_tight = 1e-16
 # Test whether this has been done on a prior run in this session because it's slow
