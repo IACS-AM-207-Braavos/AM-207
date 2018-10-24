@@ -90,7 +90,7 @@ class SoftmaxRegression(nn.Module):
 
         super().__init__()
         self.layer_1_linear = nn.Linear(784, 10)
-        self.layer_2_softmax = nn.softmax(dim=0)
+        self.layer_2_softmax = nn.Softmax(dim=0)
  
     def forward(self, x):
      
@@ -104,17 +104,17 @@ class SoftmaxRegression(nn.Module):
 class TwoLayerNetwork(nn.Module):
     """Two layer neural network with one hidden layer"""
 
-    def __init__(self):
+    def __init__(self, num_hidden: int):
 
         super().__init__()
         # The linear layer
-        self.layer_1_linear = nn.Linear(784, 50)
+        self.layer_1_linear = nn.Linear(784, num_hidden)
         # Use Xavier initialization weights for this layer
-        torch.nn.init.xavier_uniform_(self.layer_1_linear)
+        torch.nn.init.xavier_uniform_(self.layer_1_linear.weight)
         # The activation layer
         self.layer_1_activation = nn.Tanh()
         # Fully connected output layer
-        self.layer_2_linear= nn.Linear(50, 10)
+        self.layer_2_linear= nn.Linear(num_hidden, 10)
  
     def forward(self, x):
      

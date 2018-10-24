@@ -4,8 +4,8 @@ Tue Oct 23 21:45:46 2018
 """
 
 import numpy as np
-import torch.nn.functional as F
-from mnist import MNIST_Classifier, LogisticRegression, SoftmaxRegression
+# import torch.nn.functional as F
+from mnist import MNIST_Classifier, LogisticRegression, SoftmaxRegression, TwoLayerNetwork
 
 
 # Set key model parameters
@@ -56,4 +56,10 @@ optimizer.zero_grad()
 smr = SoftmaxRegression()
 x = inputs
 z1 = smr.layer_1_linear(x)
-y = smr.layer_2_softmax(z1, dim=0)
+y = smr.layer_2_softmax(z1)
+
+tln = TwoLayerNetwork(50)
+x = inputs
+z1 = tln.layer_1_linear(x)
+a1 = tln.layer_1_activation(z1) 
+y = tln.layer_2_linear(a1)

@@ -39,19 +39,21 @@ plot_style()
 
 # *************************************************************************************************
 # Load persisted table of variables
-fname: str = 'mnist.pickle'
+fname: str = 'mnist_q1.pickle'
 vartbl: Dict = load_vartbl(fname)
 
-# Train the logistic regression (i.e. softmax) model with the designated inputs
 # Set key model parameters
 learning_rate = 0.1
 weight_decay = 0.01
 batch_size = 256
 validation_size = 10000
 epochs=10
+
+# Handling - do we refit models in memory?
 refit = False
 
-## Only run this block if the classifier not already in memory or the refit flag is set
+# Train the logistic regression (i.e. softmax) model with the designated inputs
+# Only run this block if the classifier not already in memory or the refit flag is set
 try:    
     mnc = vartbl['mnc']
 except:
