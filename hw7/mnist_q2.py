@@ -11,6 +11,7 @@ Wed Oct 24 00:15:40 2018
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
 # Import the classes from mnist that do all the actual work :)
 from mnist import MNIST_Classifier, TwoLayerNetwork
 from am207_utils import plot_style
@@ -154,6 +155,8 @@ def test_parameters(mncs, learning_rates, batch_sizes, nums_hidden):
                 projected = (iMax - skips - i) / i * elapsed
                 print(f'Elapsed time {int(elapsed)}, projected remaining {int(projected)} (seconds).')
 
+# *************************************************************************************************
+# 2.3
 # Range of parameter settings to try
 learning_rates = [0.1, 0.01]
 batch_sizes = [64, 128, 256]
@@ -164,21 +167,69 @@ test_parameters(mncs, learning_rates, batch_sizes, nums_hidden)
 
 # Try all of these parameters, because this is what they told us to do...
 # WARNING - this takes a long time to run, even if you have a GPU :(
+# Runtime on Microsoft Surface Pro 4 laptop with Intel i7-6650 @ 2208 MHz, 2 cores
+# was about 90 minutes  
+
+# Find the combination with the best validation accuracy
+def best_val(mnc) -> float:
+    """Return the best validation score of a model"""
+    val_scores = mnc.get_params('validation_losses')
+    best_epoch = np.argmax(val_scores)
+    best_score = val_scores[best_epoch]
+    return best_score
+
+# Dictionary with best score achieved by each model
+best_scores = {key : best_val(mnc) for key, mnc in mncs.items()}
+# Find the best key and the corresponding best mnc
+best_key = max(best_scores, key=lambda k : best_scores[k])
+best_mnc = mncs[best_key]
+best_score = best_val(best_mnc)
+best_lr, best_batch_sz, best_hidden = best_key
+# Report results
+print(f'The model with the best validation score had:')
+print(f'Learning rate = {best_lr}')
+print(f'Batch Size = {best_batch_sz}')
+print(f'Hidden Units = {best_hidden}')
+print(f'Validation Score = {best_score}')
 
 
 # *************************************************************************************************
 # 2.4. For your best combination plot the cross-entropy loss on the training set as a function of iteration.
+losses = best_mnc.get_params("training_losses")
+fig, axes = plt.subplots(nrows=1, ncols=epochs, figsize=(20,5), sharex=True, sharey=True)
+for i in range(epochs):
+    axes[i].plot(range(len(losses[i])), losses[i])
+    axes[i].set_title(f'{i+1}')
+    axes[i].set_xticks([])
+    if i % 2 == 1:
+        axes[i].axvspan(-10, 950, facecolor='gray', alpha=0.2)
+plt.subplots_adjust(wspace=0)
+plt.show()
 
 
 # *************************************************************************************************
 # 2.5. For your best combination use classification accuracy to evaluate how well your model is performing 
 # on the validation set at the end of each epoch. Plot this validation accuracy as the model trains.
 
+# The model training routine has a flag indicating whether or not to display the validation score
+# live in training.  This was turned off when training all 24 models to avoid cluttering the screen
+# with 24 models * 20 epochs = 480 intermediate charts
+# Here is a single chart built after the fact showing the score vs. the epoch
+best_mnc.viz_validation_loss(epochs-1)
 
 # *************************************************************************************************
 # 2.6. Select what you consider the best set of parameters and predict the labels of the test set. 
 # Compare your predictions with the given labels. 
 # What classification accuracy do you obtain on the training and test sets?
+
+# The model above scored the best on the validation set and it has reasonable settings.
+# Let's use that one and see how it does on the test set.
+
+# Predict the labels on the test set
+pred_test = np.array(best_mnc.predict('Test'))
+labels_test = best_mnc.get_params('prediction_dataset_labels')
+# Accuracy score on the test set
+accuracy_test = best_mnc.score('Test')
 
 
 # *************************************************************************************************
