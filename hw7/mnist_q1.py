@@ -163,7 +163,6 @@ except:
 wd_best = 0.001
 mnc_best = mncs_wd[wd_best]
 
-
 # Predict the labels on the training set
 pred_train = np.array(mnc_best.predict('Train'))
 labels_train = mnc_best.get_params('prediction_dataset_labels')

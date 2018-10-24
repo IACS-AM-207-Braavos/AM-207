@@ -225,17 +225,54 @@ best_mnc.viz_validation_loss(epochs-1)
 # The model above scored the best on the validation set and it has reasonable settings.
 # Let's use that one and see how it does on the test set.
 
+# Predict the labels on the training set
+pred_train = np.array(best_mnc.predict('Train'))
+labels_train = best_mnc.get_params('prediction_dataset_labels')
+# Accuracy score on the test set
+accuracy_train = best_mnc.score('Train')
+
 # Predict the labels on the test set
 pred_test = np.array(best_mnc.predict('Test'))
 labels_test = best_mnc.get_params('prediction_dataset_labels')
 # Accuracy score on the test set
 accuracy_test = best_mnc.score('Test')
 
+# Report the results
+print(f'Accuracy on training and test data:')
+print(f'Train: {accuracy_train*100:0.2f}%')
+print(f'Test:  {accuracy_test*100:0.2f}%')
+
 
 # *************************************************************************************************
 # 2.7. How does your test accuracy compare to that of the logistic regression classifier in Question 1? 
 # Compare best parameters for both models.
 
+# See notebook
 
 # *************************************************************************************************
 # 2.8. What classes are most likely to be misclassified? Plot some misclassified training and test set images.
+
+# Report errors on the test set
+is_error = (pred_test != labels_test)
+error_rate = np.zeros(10)
+for d in range(0, 10):
+    mask = (labels_test == d)
+    count_d = np.sum(mask)
+    error_d = np.sum(is_error[mask])
+    error_rate[d] = error_d / count_d
+# Get the three biggest error rates
+# https://stackoverflow.com/questions/6910641/how-do-i-get-indices-of-n-maximum-values-in-a-numpy-array
+top_errors = np.argpartition(error_rate, -3)[-3:][::-1]
+print(f'Top three misclassified digits')
+for d in top_errors:
+    print(f'{d} : {error_rate[d]*100:0.2f}%')
+
+# Plot misclassified training images
+print(f'Misclassified Training Images:')
+best_mnc.predict('Train')
+best_mnc.viz_misclassified_images()
+
+# Plot misclassified training images
+print(f'Misclassified Test Images:')
+best_mnc.predict('Test')
+best_mnc.viz_misclassified_images()
