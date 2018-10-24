@@ -1,4 +1,7 @@
 """
+Harvard IACS AM 207
+Homework 7
+
 Michael S. Emanuel
 Mon Oct 22 22:01:33 2018
 """
@@ -14,20 +17,27 @@ import torch.nn as nn
 from torch.utils.data.sampler import SubsetRandomSampler
 
 # *************************************************************************************************
+# ATTRIBUTION:
+# This code is mostly imported as-is from the PyTorch lab.
+# I usually avoid importing large blocks of code for homework assignments,
+# but given that there is quite a bit of code and that we were urged
+# to do so for this assignment by the teaching staff, I am following this directive.
+
+# *************************************************************************************************
 # Regression Parent Class
 class Regression(object):
     
     def __init__(self):
         self.params = dict()
-    
+
     def get_params(self, k):
         return self.params.get(k, None)
-    
+
     def set_params(self, **kwargs):
         for k,v in kwargs.items():
             self.params[k] = v
-        
-                    
+
+
     def fit(self, X, y):
         raise NotImplementedError()
         
@@ -40,7 +50,7 @@ class Regression(object):
 
 # *************************************************************************************************
 ## Our PyTorch implementation of Logistic Regression
-class LRPyTorch(nn.Module):
+class LogisticRegression(nn.Module):
 
     ## the constructor is where we'll define all our layers (input, hidden, and output)
     def __init__(self):
@@ -54,7 +64,7 @@ class LRPyTorch(nn.Module):
         ## in your neural network except for the output layer.  The output layer is defined by the number of
         ## outputs in your last layer. Since we're dealing with simple Artificial Neural Networks, we should
         ## predominantly be using nn.Linear.  
-        self.l1 = nn.Linear(784, 10)
+        self.layer_1_linear = nn.Linear(784, 10)
 
  
     # forwards takes as a parameter x -- the batch of inputs that we want to feed into our neural network model
@@ -64,38 +74,61 @@ class LRPyTorch(nn.Module):
     def forward(self, x):
      
         # call all our layers on our input (in this case we only need one)
-        x = self.l1(x)
+        y = self.layer_1_linear(x)
 
-        # Since we're using Cross Entropy Loss
-        # we can return our output directly
-        return x
+        return y
     
 
 # *************************************************************************************************
-class MLP_PyTorch(nn.Module):
-    """Multilayer perceptron model (placeholder for now)"""
+class SoftmaxRegression(nn.Module):
+    """
+    This model explicitly does the softmax activation.
+    Should not be used when criterion=nn.CrossEntropyLoss
+    """
 
     def __init__(self):
 
         super().__init__()
-
-        self.l1 = nn.Linear(784, 10)
-        
-
+        self.layer_1_linear = nn.Linear(784, 10)
+        self.layer_2_softmax = nn.softmax(dim=0)
  
     def forward(self, x):
      
-        # call all our layers on our input (in this case we only need one)
-        x = self.l1(x)
-
-        return x
+        # Call layers in order
+        z1 = self.layer_1_linear(x)
+        y = self.layer_2_softmax(z1)
+        return y
     
 
 # *************************************************************************************************
+class TwoLayerNetwork(nn.Module):
+    """Two layer neural network with one hidden layer"""
 
-class MNIST_Logistic_Regression(Regression):
+    def __init__(self):
+
+        super().__init__()
+        # The linear layer
+        self.layer_1_linear = nn.Linear(784, 50)
+        # Use Xavier initialization weights for this layer
+        torch.nn.init.xavier_uniform_(self.layer_1_linear)
+        # The activation layer
+        self.layer_1_activation = nn.Tanh()
+        # Fully connected output layer
+        self.layer_2_linear= nn.Linear(50, 10)
+ 
+    def forward(self, x):
+     
+        # call all our layers on our input
+        z1 = self.layer_1_linear(x)
+        a1 = self.layer_1_activation(z1) 
+        y = self.layer_2_linear(a1)
+        return y
     
-    def __init__(self, learning_rate, weight_decay, batch_size, epochs, validation_size):
+
+# *************************************************************************************************
+class MNIST_Classifier(Regression):
+    
+    def __init__(self, model, learning_rate, weight_decay, batch_size, epochs, validation_size):
         
         super().__init__()
                 
@@ -118,9 +151,6 @@ class MNIST_Logistic_Regression(Regression):
                         is_fit = False)
         
         
-        ## Here we instantiate the PyTorch model that we so nicely defined previously
-        model = LRPyTorch()
-
         ## Here we define our loss function.  We're using CrossEntropyLoss but other options include
         ## NLLLoss (negative log likelihood loss for when the log_softmax activation is explicitly defined
         ## on the output layer), MSELoss for OLS Regression, KLLDivLoss for KL Divergence, BCELoss
@@ -175,9 +205,10 @@ class MNIST_Logistic_Regression(Regression):
         self.set_params(train_idx=train_idx, validation_idx=validation_idx)
         
         # Define samples to be SubsetRandomSampler
+        # This section is changed from the lab
         train_sampler = SubsetRandomSampler(train_idx)
         validation_sampler = SubsetRandomSampler(validation_idx)
-
+        # This section is also changed from the lab
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)        
         validation_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, sampler=validation_sampler)
         test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -248,9 +279,9 @@ class MNIST_Logistic_Regression(Regression):
 
         for i in range(5):
             ax1[i].imshow(sample_images[i])
-            ax1[i].set_title("MNIST Label: {} Classified: {}".format(true_labels[i], sample_labels[i]), weight='bold')
+            ax1[i].set_title("Label: {} Pred: {}".format(true_labels[i], sample_labels[i]), weight='bold')
             ax2[i].imshow(sample_images[i+5])
-            ax2[i].set_title("MNIST Label: {} Classified: {}".format(true_labels[i+5], sample_labels[i+5]), weight='bold')
+            ax2[i].set_title("Label: {} Pred: {}".format(true_labels[i+5], sample_labels[i+5]), weight='bold')
 
         plt.show()
 
@@ -267,7 +298,7 @@ class MNIST_Logistic_Regression(Regression):
         
         for i in range(epochs):
             axes[i].plot(range(len(losses[i])), losses[i])
-            axes[i].set_title("epoch {}".format(i))
+            axes[i].set_title("epoch {}".format(i+1))
             if i % 2 == 1:
                 axes[i].axvspan(-10, 950, facecolor='gray', alpha=0.2)
         plt.subplots_adjust(wspace=0)
@@ -278,11 +309,11 @@ class MNIST_Logistic_Regression(Regression):
         losses = self.get_params('validation_losses')[0:epoch+1]
         weight_decay = self.get_params('weight_decay')
         fig, ax = plt.subplots(figsize=(16,8))
-        ax.set_title(f'Validation Accuracy: Epoch {epoch} for $\lambda$={weight_decay}')
+        ax.set_title(f'Validation Accuracy: Epoch {epoch+1} for $\lambda$={weight_decay}')
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Validation Accuracy')
         if epoch > 0:
-            ax.plot(np.arange(epoch+1), losses)
+            ax.plot(np.arange(epoch+1)+1, losses)
         else:
             ax.axhline(losses[0])
         ax.grid()
@@ -347,17 +378,17 @@ class MNIST_Logistic_Regression(Regression):
     
     def score(self, dataset='Test', save_misclassified=True ):
         """Calculate accuracy score based upon model classification"""
-        
+
         self.predict(dataset=dataset, save_misclassified=save_misclassified)
         correct = self.get_params('correct_predictions')
         total = self.get_params('prediction_dataset_length')
         accuracy: float = float(correct)/float(total)
         print(f'Dataset: {dataset} \nAccuracy: {correct}/{total} ({100*accuracy:.1f}%)\n')
-        
+
         return accuracy
         
-        
-    def fit(self):
+
+    def fit(self, viz_val_loss = False):
         """Fit our logistic regression model on MNIST training set"""
         
         ## We defined a number of variables in our constructor -- let's reclaim them here
@@ -426,7 +457,8 @@ class MNIST_Logistic_Regression(Regression):
                 loss = criterion(outputs, labels)
                 
                 ## count the loss
-                losses[epoch,batch_index] = loss.data[0]
+                # losses[epoch,batch_index] = loss.data[0]
+                losses[epoch,batch_index] = loss.data.item()
 
                 # we run backpropagation on the loss variable which repopulates the gradients all the way
                 # back through our model to the input layer
@@ -436,14 +468,18 @@ class MNIST_Logistic_Regression(Regression):
                 # gradient descent step
                 optimizer.step()
                 
-            # Validation loss at the end of the epochs
+            # Validation loss at the end of this epoch
             loss_val = self.score(dataset='Validation')
             losses_val[epoch] = loss_val
             
-            # Visualize the validation loss
-            self.viz_validation_loss(epoch)
-                
-        
+            # Visualize the validation loss each epoch if desired
+            if viz_val_loss:
+                self.viz_validation_loss(epoch)
+            
+        # Visualize validation loss by epoch at the very end if not already done
+        if not viz_val_loss:
+            self.viz_validation_loss(epochs-1)
+
         # Set flag indicating that the model is now fit
         self.set_params(is_fit=True)
         
