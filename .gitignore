@@ -1,3 +1,7 @@
+# Serialized data - include manually if desired
+*.pickle
+*.pkl
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
