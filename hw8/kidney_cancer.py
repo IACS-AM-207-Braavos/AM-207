@@ -204,7 +204,8 @@ def make_scatter(mortality_rates, post_means):
     mortality_plot = mortality_rates * 100000
     post_plot = post_means * 100000 
     ax.scatter(mortality_plot, post_plot, label='Counties', s=9)
-    ax.hline(y=mu*100000,label='Avg')
+    ax.axhline(y=mu*100000, color='r', label='Avg')
+    ax.plot(np.linspace(0,20,100), np.linspace(0,20,100), color='k', label='y=x')
     ax.grid()
     ax.legend()
     plt.show()
