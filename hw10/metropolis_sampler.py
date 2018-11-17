@@ -1,6 +1,7 @@
 """
 Harvard Applied MAth 207
 Homework 10
+Problem 1
 
 Michael S. Emanuel
 Wed Nov 14 10:50:44 2018
