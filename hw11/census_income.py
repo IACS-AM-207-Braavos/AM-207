@@ -10,8 +10,10 @@ Fri Nov 30 10:53:40 2018
 import numpy as np
 import pandas as pd
 import pymc3 as pm
-from am207_utils import load_vartbl, save_vartbl
+import matplotlib.pyplot as plt
+from am207_utils import load_vartbl, save_vartbl, plot_style
 from IPython.display import display
+import warnings
 from typing import Dict
 
 
@@ -23,6 +25,12 @@ vartbl: Dict = load_vartbl(fname)
 # Fix obscure bug when running code in iPython / Spyder
 # https://stackoverflow.com/questions/45720153/python-multiprocessing-error-attributeerror-module-main-has-no-attribute
 __spec__ = "ModuleSpec(name='builtins', loader=<class '_frozen_importlib.BuiltinImporter'>)"
+
+# Turn off deprecation warning triggered by theano
+warnings.simplefilter('ignore')
+
+# Set plot style
+plot_style()
 
 # *************************************************************************************************
 # Question 1: Crazy Rich Bayesians Don't Need No Educations?
@@ -109,7 +117,7 @@ def load_data():
     sex = df_full.sex
     sex_id = pd.Series(sex.map(sexID_map), name='sex_id', dtype='category')
     # The earnings (trying to predict this)
-    earn_hi = pd.Series(df_full.earning.map(earning_map), name='earn_hi', dtype=np.int64)
+    earn_hi = pd.Series(df_full.earning.map(earning_map), name='earn_hi', dtype=np.int32)
     
     # Create a new dataframe
     df = pd.concat([education_id, sex_id, education, sex, earn_hi], axis=1, 
@@ -121,15 +129,13 @@ def load_data():
     gb = df.groupby(by=[education_id, sex_id])
     counts = gb.size().to_frame(name='count')
     df_agg = counts.join(gb.agg({'earn_hi': 'sum'})).reset_index()
+    # Change count column to 32 bit integer for compatibility with pymc3 sampling
+    df_agg['count'] = df_agg['count'].astype(np.int32)
     # Add indicators is_male, is_female
     df_agg['is_male'] = np.zeros_like(df_agg.education_id, dtype=float)
     df_agg['is_female'] = np.zeros_like(df_agg.education_id, dtype=float)
-    # Set is_male to 1.0 on the male entries
-    mask_male = (df_agg.sex_id == 0)
-    df_agg.loc[mask_male, 'is_male'] = 1.0
-    # Set is_female to 1.0 on the female entries
-    mask_female = (df_agg.sex_id == 1)
-    df_agg.loc[mask_female, 'is_female'] = 1.0
+    # High earning rate in each category
+    df_agg['earn_hi_rate'] = df_agg['earn_hi'] / df_agg['count']
     # Return the dataframe    
     return df_agg, educationID_map, sexID_map
 
@@ -199,21 +205,20 @@ with pm.Model() as model_base:
     # The probability follows logit(p_i) ~ alpha_i --> p_i ~ invlogit(alpha_i)
     p = pm.Deterministic('p', pm.math.invlogit(logit_p))
     # Data likelihood
-    obs_earn = pm.Binomial('obs_earn', n=df['count'].values, p=p, observed=df['earn_hi'].values)
+    obs_earn = pm.Binomial('obs_earn', n=df['count'].values, p=p, observed=df['earn_hi'].values, dtype='int64')
 
 # Draw samples from model_base
 try:
-    model_base_trace = vartbl['model_base_trace']
-    print(f'Loaded model_base_trace from variable table in {fname}.')
+    trace_base = vartbl['trace_base']
+    print(f'Loaded trace_base from variable table in {fname}.')
 except:    
     with model_base:
         # Need to manually specify cores=1 or this blows up on windows.
         # this is a a known bug on pymc3
         # https://github.com/pymc-devs/pymc3/issues/3140
-        model_base_trace = pm.sample(10000, chains=2, cores=1)
-    vartbl['model_base_trace'] = model_base_trace
+        trace_base = pm.sample(10000, chains=2, cores=1)
+    vartbl['trace_base'] = trace_base
     save_vartbl(vartbl, fname)
-
 
 # *************************************************************************************************
 # Create a model using only sex; name it model_sex
@@ -229,15 +234,12 @@ with pm.Model() as model_sex:
 
 # Draw samples from model_sex
 try:
-    model_sex_trace = vartbl['model_sex_trace']
-    print(f'Loaded model_sex_trace from variable table in {fname}.')
+    trace_sex = vartbl['trace_sex']
+    print(f'Loaded trace_sex from variable table in {fname}.')
 except:    
     with model_sex:
-        # Need to manually specify cores=1 or this blows up on windows.
-        # this is a a known bug on pymc3
-        # https://github.com/pymc-devs/pymc3/issues/3140
-        model_sex_trace = pm.sample(10000, chains=2, cores=1)
-    vartbl['model_sex_trace'] = model_sex_trace
+        trace_sex = pm.sample(10000, chains=2, cores=1)
+    vartbl['trace_sex'] = trace_sex
     save_vartbl(vartbl, fname)
 
 
@@ -245,7 +247,79 @@ except:
 # 1.3. Replicate the analysis in 10.1.3 using your models; specifically, compute wAIC scores and 
 # make a plot like Figure 10.5 (posterior check) to see how well your models fits the data.
 # *************************************************************************************************
+def plot_posterior(HER_data, HER_mean, HER_lo, HER_hi, model_name):
+    """Generate the posterior validation plot following the example in Statistical Rethinking"""
+    fig, ax = plt.subplots(figsize=[16,8])
+    ax.set_title(f'Posterior Validation Check for {model_name} Model')
+    # x axis for plots
+    xx = np.arange(num_obs)
+    ax.set_xticks(xx)
+    ax.set_xlabel('Case')
+    ax.set_ylabel('High Earning Rate (Above $50k)')
 
+    # Actual data
+    p1 = ax.plot(xx, HER_data, marker='o', color='b', markersize=8, linewidth=0, label='Data')
+    # Lines between consecutive male / female pairs
+    for i in range(num_obs // 2):
+        i0 = 2*i
+        i1 = i0+2
+        ax.plot(xx[i0:i1], HER_data[i0:i1], marker=None, color='b')
+    # Mean, Lo, and Hi model estimates
+    p2 = ax.plot(xx, HER_lo, marker='_', color='k', markersize=10, linewidth=0, label='Low')
+    p3 = ax.plot(xx, HER_mean, marker='o', color='r', markerfacecolor='None', markersize=10, linewidth=0, label='Mean')
+    p4 = ax.plot(xx, HER_hi, marker='_', color='k', markersize=10, linewidth=0, label='High')
+    # Vertical lines closing up whiskers
+    for i in range(num_obs):
+        ax.plot(np.array([i,i]), np.array([HER_lo[i], HER_hi[i]]), marker=None, color='k')
+
+    # Legend
+    handles = [p1[0], p2[0], p3[0], p4[0]]
+    labels = ['Data', 'Low', 'Mean', 'High']
+    ax.legend(handles, labels)
+    ax.grid()
+    plt.show()
+
+# *************************************************************************************************
+# Compute WAIC for both models
+waic_base = pm.waic(trace_base, model_base)
+waic_sex = pm.waic(trace_sex, model_sex)
+# Set model names
+model_base.name = 'base'
+model_sex.name = 'sex'
+# Comparison of WAIC
+comp_WAIC_base_v_sex = pm.compare({model_base: trace_base, model_sex: trace_sex})
+display(comp_WAIC_base_v_sex)
+pm.compareplot(comp_WAIC_base_v_sex)
+
+# Generate the posterior predictive in both base and sex models
+try:
+    post_pred_base = vartbl['post_pred_base']
+    post_pred_sex = vartbl['post_pred_sex']
+except:
+    with model_base:
+        post_pred_base = pm.sample_ppc(trace_base)
+    with model_sex:
+        post_pred_sex = pm.sample_ppc(trace_sex)
+    vartbl['post_pred_base'] = post_pred_base
+    vartbl['post_pred_sex'] = post_pred_sex
+    save_vartbl(vartbl, fname)
+
+# True rate of high earners in each class
+HER_data = df['earn_hi_rate'].values
+
+# Mean, low (5.5th percentile), and high (94.5th percentile) estimates of high earning rate (HER) in base model
+HER_mean_base = np.mean(post_pred_base['obs_earn'], axis=0) / df['count'].values
+HER_lo_base = np.percentile(a=post_pred_base['obs_earn'],q=5.5, axis=0) / df['count'].values
+HER_hi_base = np.percentile(a=post_pred_base['obs_earn'],q=94.5, axis=0) / df['count'].values
+
+# HER in sex model
+HER_mean_sex = np.mean(post_pred_sex['obs_earn'], axis=0) / df['count'].values
+HER_lo_sex = np.percentile(a=post_pred_sex['obs_earn'],q=5.5, axis=0) / df['count'].values
+HER_hi_sex = np.percentile(a=post_pred_sex['obs_earn'],q=94.5, axis=0) / df['count'].values
+
+# Plot the posterior validation check for the base model
+plot_posterior(HER_data, HER_mean_base, HER_lo_base, HER_hi_base, 'Base')
+plot_posterior(HER_data, HER_mean_sex, HER_lo_sex, HER_hi_sex, 'Sex')
 
 # *************************************************************************************************
 # 1.4. Following Example 10.1.3, build two models for the classification of an individual's yearly income 
@@ -255,59 +329,92 @@ except:
 
 # Create a model using only education; name it model_edu
 with pm.Model() as model_edu:
-    # The alpha (baseline) shared by all the educational categories
-    alpha = pm.Normal(name='alpha', mu=alpha_mu, sd=alpha_sd)
     # The beta for each of the seven educational categories
-    beta_edu = pm.Normal(name='beta_edu', mu=beta_edu_mu, sd=beta_edu_sd, shape=num_obs)
+    beta_edu = pm.Normal(name='beta_edu', mu=beta_edu_mu, sd=beta_edu_sd, shape=num_edu)
+    # The logit for each category
+    logit_p = pm.Deterministic('logit_p', beta_edu[df.education_id])
     # The probability follows logit(p_i) ~ alpha_i --> p_i ~ invlogit(alpha_i)
-    p = pm.Deterministic('p', pm.math.invlogit(beta_edu + alpha))
+    p = pm.Deterministic('p', pm.math.invlogit(logit_p))
     # Data likelihood
     obs_earn = pm.Binomial('obs_earn', n=df['count'].values, p=p, observed=df['earn_hi'].values)
 
 # Draw samples from model_edu
 try:
-    model_edu_trace = vartbl['model_edu_trace']
-    print(f'Loaded model_edu_trace from {fname}.')
+    trace_edu = vartbl['trace_edu']
+    print(f'Loaded trace_edu from variable table in {fname}.')
 except:    
     with model_edu:
-        # Need to manually specify cores=1 or this blows up on windows.
-        # this is a a known bug on pymc3
-        # https://github.com/pymc-devs/pymc3/issues/3140
-        model_edu_trace = pm.sample(10000, chains=2, cores=1)
-    vartbl['model_edu_trace'] = model_edu_trace
+        trace_edu = pm.sample(10000, chains=2, cores=1)
+    vartbl['trace_edu'] = trace_edu
     save_vartbl(vartbl, fname)
-
 
 # Create a model using both education and sex; name it model_edu_sex
 with pm.Model() as model_edu_sex:
-    # The mean for each of the seven educational categories
-    alpha = pm.Normal(name='alpha', mu=alpha_mu, sd=alpha_sd, shape=num_obs)
-    # The impact of sex; 
-    beta = pm.Normal(name='beta', mu=beta_mu, sd=beta_sd)
-    # Array with values of the dummy variable is_male
-    is_male = df.is_male.values    
-    # The probability follows logit(p_i) ~ alpha_i + beta * is_male_i --> p_i ~ invlogit(alpha_i + beta * is_male_i)
-    p = pm.Deterministic('p', pm.math.invlogit(alpha + beta * is_male))
+    # The beta for each of the seven educational categories
+    beta_edu = pm.Normal(name='beta_edu', mu=beta_edu_mu, sd=beta_edu_sd, shape=num_edu)
+    # The beta for the two sex categories
+    beta_sex = pm.Normal(name='beta_sex', mu=beta_sex_mu, sd=beta_sex_sd, shape=num_sex)
+    # The logit for each category
+    logit_p = pm.Deterministic('logit_p', beta_edu[df.education_id] + beta_sex[df.sex_id])
+    # The probability follows logit(p_i) ~ alpha_i --> p_i ~ invlogit(alpha_i)
+    p = pm.Deterministic('p', pm.math.invlogit(logit_p))
     # Data likelihood
     obs_earn = pm.Binomial('obs_earn', n=df['count'].values, p=p, observed=df['earn_hi'].values)
 
-# Draw samples from model_edu
+# Draw samples from model_edu_sex
 try:
-    model_edu_sex_trace = vartbl['model_edu_trace']
-    print(f'Loaded model_edu_sex_trace from {fname}.')
+    trace_edu_sex = vartbl['trace_edu_sex']
+    print(f'Loaded trace_edu from variable table in {fname}.')
 except:    
     with model_edu_sex:
         model_edu_sex_trace = pm.sample(10000, chains=2, cores=1)
-    vartbl['model_edu_sex_trace'] = model_edu_sex_trace
+    vartbl['trace_edu_sex'] = trace_edu_sex
     save_vartbl(vartbl, fname)
-
-
 
 # *************************************************************************************************
 # 1.5. Replicate the analysis in 10.1.3 using your models; specifically, compute wAIC scores and 
 # make a plot like Figure 10.6 (posterior check) to see how well your model fits the data.
 # *************************************************************************************************
+# Compute WAIC for both models
+waic_edu = pm.waic(trace_edu, model_edu)
+waic_edu_sex = pm.waic(trace_edu_sex, model_edu_sex)
+# Set model names
+model_base.name = 'edu'
+model_sex.name = 'edu_sex'
+# Comparison of WAIC
+comp_WAIC_edu_v_both = pm.compare({model_edu: trace_edu, model_edu_sex: trace_edu_sex})
+display(comp_WAIC_edu_v_both)
+pm.compareplot(comp_WAIC_edu_v_both)
 
+# Generate the posterior predictive in both base and sex models
+try:
+    post_pred_edu = vartbl['post_pred_edu']
+    post_pred_edu_sex = vartbl['post_pred_edu_sex']
+except:
+    with model_edu:
+        post_pred_edu = pm.sample_ppc(trace_edu)
+    with model_edu_sex:
+        post_pred_edu_sex = pm.sample_ppc(trace_edu_sex)
+    vartbl['post_pred_edu'] = post_pred_edu
+    vartbl['post_pred_edu_sex'] = post_pred_edu_sex
+    save_vartbl(vartbl, fname)
+
+# True rate of high earners in each class
+HER_data = df['earn_hi_rate'].values
+
+# Mean, low (5.5th percentile), and high (94.5th percentile) estimates of high earning rate (HER) in base model
+HER_mean_edu = np.mean(post_pred_edu['obs_earn'], axis=0) / df['count'].values
+HER_lo_edu = np.percentile(a=post_pred_edu['obs_earn'],q=5.5, axis=0) / df['count'].values
+HER_hi_edu = np.percentile(a=post_pred_edu['obs_earn'],q=94.5, axis=0) / df['count'].values
+
+# HER in sex model
+HER_mean_edu_sex = np.mean(post_pred_edu_sex['obs_earn'], axis=0) / df['count'].values
+HER_lo_edu_sex = np.percentile(a=post_pred_edu_sex['obs_earn'],q=5.5, axis=0) / df['count'].values
+HER_hi_edu_sex = np.percentile(a=post_pred_edu_sex['obs_earn'],q=94.5, axis=0) / df['count'].values
+
+# Plot the posterior validation check for the base model
+plot_posterior(HER_data, HER_mean_edu, HER_lo_edu, HER_hi_edu, 'Education')
+plot_posterior(HER_data, HER_mean_edu_sex, HER_lo_edu_sex, HER_hi_edu_sex, 'Education & Sex')
 
 # *************************************************************************************************
 # 1.6. Using your analysis from 1.3, discuss the effect gender has on income.
