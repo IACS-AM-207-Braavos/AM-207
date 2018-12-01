@@ -295,6 +295,7 @@ pm.compareplot(comp_WAIC_base_v_sex)
 try:
     post_pred_base = vartbl['post_pred_base']
     post_pred_sex = vartbl['post_pred_sex']
+    print(f'Loaded posterior predictive for base and sex models.')
 except:
     with model_base:
         post_pred_base = pm.sample_ppc(trace_base)
@@ -390,6 +391,7 @@ pm.compareplot(comp_WAIC_edu_v_both)
 try:
     post_pred_edu = vartbl['post_pred_edu']
     post_pred_edu_sex = vartbl['post_pred_edu_sex']
+    print(f'Loaded posterior predictive for edu and edu_sex models.')
 except:
     with model_edu:
         post_pred_edu = pm.sample_ppc(trace_edu)
