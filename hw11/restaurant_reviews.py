@@ -316,7 +316,24 @@ for iax, ax in enumerate(axes.ravel()):
 # of modeling each reviewer's opinion using your hierarchical model rather than approximating 
 # the reviewer opinion with the value in "mean".
 # *************************************************************************************************
+        
+# Compute the mean of posterior positive sentiment about food and service
+food_ratings = [np.mean(th_food) for th_food in ths_food]
+service_ratings = [np.mean(th_service) for th_service in ths_service]
+# Arrange these ratings into a dictionary
+rating_tbl = {rests[i] : (food_ratings[i], service_ratings[i]) for i in range(rest_count)}
 
+# Rank the restaurants by food rating:
+ranked_by_food = sorted(rating_tbl, key= lambda x : rating_tbl[x][0], reverse=True)
+print(f'Restuarants ranked by food rating:')
+for rest in ranked_by_food:
+    print(f'Restaurant ID {rest}, food rating {rating_tbl[rest][0]:0.3f}')
+    
+# Rank the restaurants by service rating:
+ranked_by_service = sorted(rating_tbl, key= lambda x : rating_tbl[x][1], reverse=True)
+print(f'\nRestuarants ranked by service rating:')
+for rest in ranked_by_service:
+    print(f'Restaurant ID {rest}, service rating {rating_tbl[rest][1]:0.3f}')
 
 # *************************************************************************************************
 # 3.5. Aggregate, in a simple but reasonable way, the reviewer's opinions given a pair of overall scores 
