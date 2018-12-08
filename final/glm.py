@@ -104,7 +104,7 @@ num_tune: int = 1000
 # Define the fixed-effects model
 with pm.Model() as model_fe:
     # Set the prior for the intercept in each district
-    alpha_district = pm.Normal('alpha_district', mu=0.0, sd=10.0, shape=num_districts)
+    alpha_district = pm.Normal(name='alpha_district', mu=0.0, sd=10.0, shape=num_districts)
     # Set the probability that each woman uses contraception in this model
     # It depends only on the district she lives in
     p = pm.math.invlogit(alpha_district[df.district_id])
@@ -131,14 +131,12 @@ col_names_fe = [f'alpha_{i}' for i in range(num_districts)]
 df_alpha_samples_fe = pd.DataFrame(data=alpha_samples_fe, columns = col_names_fe)
 
 
-# forest plot
+# forest plot for district model
 fig = plt.figure(figsize=(12,20))
-# gs = pm.forestplot(trace_fe, main='Fixed Effect Model', gs=gs_in)
-gs = pm.forestplot(trace_fe, main='Fixed Effect Model', 
-                   ylabels=[f'dist {i}' for i in range(num_districts)],
-                   plot_kwards={'fontsize':10})
+gs = pm.forestplot(trace_fe, ylabels=[f'dist {i}' for i in range(num_districts)],)
 gs.figure = fig
-
+ax1, ax2 = fig.axes
+ax1.set_xlim(0.8, 1.2)
 
 # *************************************************************************************************
 # A2 Fit a multi-level "varying-effects" model with an overall intercept alpha, 
@@ -147,6 +145,39 @@ gs.figure = fig
 # are all drawn from the same normal distribution with mean 0 and standard deviation σ. 
 # Let σ be drawn from HalfCauchy(2). 
 # The setup of this model is similar to the per-chimanzee models in the prosocial chimanzee labs.
+
+# Define the varying-effects model
+with pm.Model() as model_ve:
+    # Set the prior for the overall intercept
+    alpha = pm.Normal(name='alpha', mu=0.0, sd=10.0)
+    # Set the width sigma for the variability among districts
+    sigma = pm.HalfCauchy(name='sigma', beta=2.0)
+    # Set the district-specific alphas to have mean 0 and standard deviation sigma
+    alpha_district = pm.Normal(name='alpha_district', mu=0.0, sd=sigma, shape=num_districts)    
+    # Set the probability that each woman uses contraception in this model
+    # It depends only on the district she lives in
+    p = pm.math.invlogit(alpha + alpha_district[df.district_id])
+    # The response variable - whether this woman used contraception; modeled as Bernoulli
+    # Bind this to the observed values
+    use_contraception = pm.Bernoulli('use_contraception', p=p, observed=df['use_contraception'])
+
+# Sample from the variable-effects model
+try:
+    trace_ve = vartbl['trace_ve']
+    print(f'Loaded samples for the Variable Effects model in trace_ve.')
+except:
+    with model_ve:
+        trace_ve = pm.sample(draws=num_samples, tune=num_tune, chains=2, cores=1)
+    vartbl['trace_ve'] = trace_ve
+    save_vartbl(vartbl, fname)
+
+# Summary of the fixed-effects model
+summary_ve = pm.summary(trace_ve)
+# Samples of alpha as a an Nx60 array
+alpha_samples_ve = trace_ve.get_values('alpha_district')
+# Arrange the alpha samples into a dataframe for plotting
+col_names_ve = ['alpha'] + [f'alpha_{i}' for i in range(num_districts)]
+df_alpha_samples_ve = pd.DataFrame(data=alpha_samples_ve, columns = col_names_ve)
 
 
 # *************************************************************************************************
