@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 
 
 def load_results(exp_name):
+    """Load the results of one experiment from collection of json files output by bgan program."""
     # Path name for this experiment
     path = exp_name + "\\"
     # List of all results files
@@ -51,9 +52,10 @@ def load_results(exp_name):
     return df
 
 
-def plot_results(df, fname):
+def plot_results(df, exp_name):
+    """Plot the results of one experiment stored in a dataframe."""
     fig, ax = plt.subplots(figsize=[12,8])
-    ax.set_title('GAN Losses: four_shapes')
+    ax.set_title(f'GAN Losses: {exp_name}')
     ax.set_xlabel('Iteration Number')
     ax.set_ylabel('Loss (%)')
     ax.plot(df.iter_num, df.disc_loss_trn)
@@ -62,23 +64,33 @@ def plot_results(df, fname):
     ax.plot(df.iter_num, df.gen_loss_tst)
     ax.legend()
     ax.grid()
+    fname = f'{exp_name}.png'
     fig.savefig(fname)
 
 
-# Path with results files
-# path = 'four_shapes/'
-# Experiment name
-exp_name = 'four_shapes'
-# Name of dataframe
-df_name = f'{exp_name}.csv'
-# Dataframe with results
-try:
-    df = pd.loadcsv(df_name)
-except:
-    df = load_results(exp_name)
-    df.to_csv(df_name)
-    
-# Plot these results
-plot_results(df, 'four_shapes.png')
-plot_results(df[0:100], 'four_shapes_10k.png')
+def process(exp_name: str):
+    """Process one experiment: load or generate the dataframe and plot it."""
+    # Name of dataframe
+    df_name = f'{exp_name}.csv'
+    # Dataframe with results
+    try:
+        df = pd.read_csv(df_name)
+    except:
+        df = load_results(exp_name)
+        df.to_csv(df_name)
+        
+    # Plot these results
+    plot_results(df, f'{exp_name}')
+    plot_results(df[0:100], f'{exp_name}_10k')
+
+
+def main():
+    # list of exeriments
+    exp_names = ['four_shapes', 'mnist_semi_bayes', 'mnist_semi_ml']
+    # process each experiment
+    for exp_name in exp_names:
+        process(exp_name)
+        
+if __name__ == '__main__':
+    main()
 
