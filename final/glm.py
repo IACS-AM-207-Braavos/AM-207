@@ -11,6 +11,7 @@ import numpy as np
 import scipy.stats
 import pandas as pd
 import pymc3 as pm
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn.apionly as sns
 from IPython.display import display
@@ -28,7 +29,7 @@ vartbl: Dict = load_vartbl(fname)
 __spec__ = "ModuleSpec(name='builtins', loader=<class '_frozen_importlib.BuiltinImporter'>)"
 
 # Silence warnings (too noisy)
-# warnings.simplefilter('ignore')
+warnings.simplefilter('ignore')
 
 # *************************************************************************************************
 # Q1: GLMs with correlation
@@ -130,8 +131,8 @@ alpha_samples_fe = trace_fe.get_values('alpha_district')
 col_names_fe = [f'alpha_{i}' for i in range(num_districts)]
 df_alpha_samples_fe = pd.DataFrame(data=alpha_samples_fe, columns = col_names_fe)
 
-
 # forest plot for district model
+mpl.rcParams.update({'font.size': 16})
 fig = plt.figure(figsize=(12,20))
 gs = pm.forestplot(trace_fe, ylabels=[f'dist {i}' for i in range(num_districts)],)
 gs.figure = fig
@@ -171,28 +172,96 @@ except:
     vartbl['trace_ve'] = trace_ve
     save_vartbl(vartbl, fname)
 
-# Summary of the fixed-effects model
+# Summary of the variable-effects model
 summary_ve = pm.summary(trace_ve)
+
 # Samples of alpha as a an Nx60 array
-alpha_samples_ve = trace_ve.get_values('alpha_district')
+alpha_overall_ve = trace_ve.get_values('alpha')
+alpha_district_samples_ve = trace_ve.get_values('alpha_district')
+alpha_samples_ve = np.hstack([alpha_overall_ve.reshape(-1,1), alpha_district_samples_ve])
+
 # Arrange the alpha samples into a dataframe for plotting
 col_names_ve = ['alpha'] + [f'alpha_{i}' for i in range(num_districts)]
 df_alpha_samples_ve = pd.DataFrame(data=alpha_samples_ve, columns = col_names_ve)
 
+# Samples of alpha as an Nx60 array
+alpha_overall_ve = trace_ve.get_values('alpha')
+alpha_district_samples_ve = trace_ve.get_values('alpha_district')
+alpha_samples_ve = np.hstack([alpha_overall_ve.reshape(-1,1), alpha_district_samples_ve]).shape
+y_labels = ['intercept'] + [f'district {i}' for i in range(num_districts)]
+
+# Arrange the alpha samples into a dataframe for plotting
+col_names_ve = ['alpha'] + [f'alpha_{i}' for i in range(num_districts)]
+df_alpha_samples_ve = pd.DataFrame(data=alpha_samples_fe, columns = col_names_fe)
 
 # *************************************************************************************************
 # A3 What does a posterior-predictive sample in this model look like? 
 # What is the difference between district specific posterior predictives and woman specific posterior predictives. 
 # In other words, how might you model the posterior predictive for a new woman being from a particular district vs 
-# that os a new woman in the entire sample? 
+# that of a new woman in the entire sample? 
 # This is a word answer; no programming required.
 
+# See notebook
 
 # *************************************************************************************************
-# A4 Plot the predicted proportions of women in each district using contraception against the id of the district, 
-# in both models. 
+# A4 Plot the predicted proportions of women in each district using contraception 
+# against the id of the district, in both models. 
 # How do these models disagree? Look at the extreme values of predicted contraceptive use in the fixed effects model. 
 # How is the disagreement in these cases?
+
+# Generate posterior predictive samples in both models
+num_samples_ppc: int = 10000
+try:
+    post_pred_fe = vartbl['post_pred_fe']
+    post_pred_ve = vartbl['post_pred_ve']
+    print(f'Loaded posterior predictive samples for Fixed Effects and Varying Effects models.')
+except:
+    post_pred_fe = pm.sample_ppc(trace_fe, samples=num_samples_ppc, model=model_fe)
+    post_pred_ve = pm.sample_ppc(trace_ve, samples=num_samples_ppc, model=model_ve)
+    vartbl['post_pred_fe'] = post_pred_fe
+    vartbl['post_pred_ve'] = post_pred_ve
+
+# Compute the mean contraception use in posterior samples of each model
+df['use_contraception_fe'] = np.mean(post_pred_fe['use_contraception'], axis=0)
+df['use_contraception_ve'] = np.mean(post_pred_ve['use_contraception'], axis=0)
+
+# Update the aggregated contraception use in each district
+agg_tbl = {
+        'woman': ['count'],
+        'use_contraception': ['mean'],
+        'use_contraception_fe': ['mean'],
+        'use_contraception_ve': ['mean'],        
+        } 
+df_district = df.groupby(by=df.district_id).agg(agg_tbl)
+df_district.columns = ["_".join(x) for x in df_district.columns.ravel()]
+# Change column names to make model suffix at the end of the name
+df_district.rename(axis='columns', inplace=True, mapper=
+    {'use_contraception_fe_mean':'use_contraception_mean_fe',
+     'use_contraception_ve_mean':'use_contraception_mean_ve',
+     })
+
+# Set up horizontal bar chart
+district_id_agg = df_district.index.values
+# Spacing between models in each district
+space = 0.3
+plot_y1 = district_id_agg - space
+plot_y2 = district_id_agg
+plot_y3 = district_id_agg + space
+# Height of each horizontal bar
+height = 0.2
+
+# Plot contraception use for each district
+fig, ax = plt.subplots(figsize=[16,20])
+ax.set_title('Contraception Use vs. DistrictID by Model')
+ax.set_xlabel('Contraception Use in District')
+ax.set_ylabel('District ID')
+ax.set_ylim(0, 60)
+ax.barh(y=plot_y1, width=df_district.use_contraception_mean, height=height, label='Data', color='r')
+ax.barh(y=plot_y2, width=df_district.use_contraception_mean_fe, height=height, label='FE', color='g')
+ax.barh(y=plot_y3, width=df_district.use_contraception_mean_ve, height=height, label='VE', color='b')
+ax.legend()
+ax.grid()
+
 
 
 # *************************************************************************************************
