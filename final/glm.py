@@ -7,14 +7,19 @@ Michael S. Emanuel
 Sat Dec  8 10:05:42 2018
 """
 
+# Core calculations
 import numpy as np
 import scipy.stats
 import pandas as pd
 import pymc3 as pm
+import theano.tensor as tt
+from theano.printing import pydotprint
+# Charting & display
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn.apionly as sns
 from IPython.display import display
+# Miscellaneous
 import warnings
 from am207_utils import load_vartbl, save_vartbl
 from typing import Dict
@@ -138,6 +143,7 @@ gs = pm.forestplot(trace_fe, ylabels=[f'dist {i}' for i in range(num_districts)]
 gs.figure = fig
 ax1, ax2 = fig.axes
 ax1.set_xlim(0.8, 1.2)
+plt.close(fig)
 
 # *************************************************************************************************
 # A2 Fit a multi-level "varying-effects" model with an overall intercept alpha, 
@@ -261,9 +267,249 @@ ax.barh(y=plot_y2, width=df_district.use_contraception_mean_fe, height=height, l
 ax.barh(y=plot_y3, width=df_district.use_contraception_mean_ve, height=height, label='VE', color='b')
 ax.legend()
 ax.grid()
-
-
+plt.close(fig)
 
 # *************************************************************************************************
 # A5 Plot the absolute value of the difference in probability of contraceptive use against the number 
 # of women sampled in each district. What do you see?
+
+# Assemble series for this plot
+# the x-axis is the number of women in the district
+plot_x = df_district.woman_count.values
+# the y-axis is the absolute value of the difference between the FE and VE models
+plot_y = np.abs(df_district.use_contraception_mean_fe - df_district.use_contraception_mean_ve).values
+
+# Generate the plot
+fig, ax = plt.subplots(figsize=[12,8])
+ax.set_title('Difference Between FE and VE Models vs. Sample Size')
+ax.set_xlabel('Sample Size (# Women Polled)')
+ax.set_ylabel('Abs(pred_FE - pred_VE)')
+ax.plot(plot_x, plot_y, color='b', marker='o', markersize=8, linewidth=0)
+ax.grid()
+plt.close(fig)
+
+# *************************************************************************************************
+# Part B.
+# Let us now fit a model with both varying intercepts by district_id (like we did in the varying effects model above) 
+# and varying slopes of urban by district_id. 
+# *************************************************************************************************
+
+# To do this, we will
+# (a) have an overall intercept, call it alpha
+# (b) have an overall slope of urban, call it beta.
+# (c) have district specific intercepts alpha_district
+# (d) district specific slopes for urban, beta_district
+# (e) model the co-relation between these slopes and intercepts.
+# We have not modelled covariance and correlation before, 
+# so look at http://am207.info/wiki/corr.html for notes on how this is done.
+
+# To see the ideas behind this, see section 13.2.2 on the income 
+# data from your textbook (included as a pdf in this zip). 
+# Feel free to use code with attribution from Osvaldo Martin..with attribution and understanding...
+# there is some sweet pymc3 technical wrangling in there.
+
+
+# *************************************************************************************************
+# B1 Write down the model as a pymc3 specification and look at its graph. 
+# Note that this model builds a 60 by 2 matrix with alpha_district values in the first column 
+# and beta_district values in the second. By assumption, the first column and the second column 
+# have correlation structure given by an LKJ prior, but there is no explicit correlation among the rows. 
+# In other words, the correlation matrix is 2x2 (not 60x60). 
+# Make sure to obtain the value of the off-diagonal correlation as a pm.Deterministic. 
+# (See Osvaldo Martin's code above)
+# *************************************************************************************************
+
+def pm_make_cov(sigma_priors, corr_coeffs, ndim):
+    """Assemble a covariance matrix single variable standard deviations and correlation coefficients"""
+    # Citation: AM 207 lecture notes: http://am207.info/wiki/corr.html
+    # Diagonal matrix of standard deviation for each varialbes
+    sigma_matrix = tt.nlinalg.diag(sigma_priors)
+    # A symmetric nxn matrix has n choose 2 = n(n-1)/2 distinct elements
+    n_elem = int(ndim * (ndim - 1) / 2)
+    # Convert between array indexing and [i, j) indexing
+    tri_index = np.zeros([ndim, ndim], dtype=int)
+    tri_index[np.triu_indices(ndim, k=1)] = np.arange(n_elem)
+    tri_index[np.triu_indices(ndim, k=1)[::-1]] = np.arange(n_elem)
+    # Assemble the covariance matrix using the equation
+    # CovMat = DiagMat * CorrMat * DiagMat
+    corr_matrix = corr_coeffs[tri_index]
+    corr_matrix = tt.fill_diagonal(corr_matrix, 1)
+    return tt.nlinalg.matrix_dot(sigma_matrix, corr_matrix, sigma_matrix)
+
+# Define a varying slopes model incorporating a beta_urban term
+with pm.Model() as model_vs:  
+    # Set the prior for the overall intercept
+    alpha = pm.Normal(name='alpha', mu=0.0, sd=10.0)
+    # Set the prior for the overall intercept on urban, beta
+    beta = pm.Normal(name='beta', mu=0.0, sd=10.0)
+    
+    # Citation: http://am207.info/wiki/corr.html for code controlling correlation structure
+    # The parameter nu is the prior on correlation; 0 is uniform, infinity is no corelation
+    nu = pm.Uniform('nu', 1.0, 5.0)
+    # The number of dimensions here is 2: correlation structure is bewteen alpha and beta by district
+    num_factors: int = 2
+    # Sample the correlation coefficients using the LKJ distribution
+    corr_coeffs = pm.LKJCorr('corr_coeffs', nu, num_factors)
+
+    # Sample the variances of the single factors
+    sigma_priors = tt.stack([pm.Lognormal('sigma_prior_alpha', mu=0.0, tau=1.0),
+                             pm.Lognormal('sigma_prior_beta', mu=0.0, tau=1.0)])
+
+    # Make the covariance matrix as a Theano tensor
+    cov = pm.Deterministic('cov', pm_make_cov(sigma_priors, corr_coeffs, num_factors))
+    # The multivariate Gaussian of (alpha, beta) by district
+    theta_district = pm.MvNormal('theta_district', mu=[0.0, 0.0], cov=cov, shape=(num_districts, num_factors))   
+
+    # The vector of standard deviations for each variable; size num_factors x num_factors
+    # Citation: efficient generation of sigmas and rhos from cov
+    # https://github.com/aloctavodia/Statistical-Rethinking-with-Python-and-PyMC3/blob/master/Chp_13.ipynb
+    sigmas = pm.Deterministic('sigmas', tt.sqrt(tt.diag(cov)))
+    # correlation matrix (num_factors x num_factors)
+    rhos = pm.Deterministic('rhos', tt.diag(sigmas**-1).dot(cov.dot(tt.diag(sigmas**-1))))
+
+    # Extract the standard deviations of alpha and beta, and the correlation coefficient rho
+    sigma_alpha = pm.Deterministic('sigma_alpha', sigmas[0])
+    sigma_beta = pm.Deterministic('sigma_beta', sigmas[1])
+    rho = pm.Deterministic('rho', rhos[0, 0])
+
+    # Extract alpha_district and beta_district from theta_district
+    alpha_district = pm.Deterministic('alpha_district', theta_district[:,0])
+    beta_district = pm.Deterministic('beta_district', theta_district[:, 1])
+
+    # Set the probability that each woman uses contraception in this model
+    # It depends on the district she lives in and whether the district is urban
+    # p = pm.math.invlogit(alpha + alpha_district[df.district_id] + 
+    #                      (beta + beta_district[df.district_id]) * df.urban)
+    p = pm.math.invlogit(alpha + theta_district[df.district_id, 0] + 
+                         (beta + theta_district[df.district_id, 1]) * df.urban)
+
+    # The response variable - whether this woman used contraception; modeled as Bernoulli
+    # Bind this to the observed values
+    use_contraception = pm.Bernoulli('use_contraception', p=p, observed=df['use_contraception'])
+
+# Generate graphs for each model
+graph_fe = pm.model_to_graphviz(model_ve)
+graph_ve = pm.model_to_graphviz(model_ve)
+graph_vs = pm.model_to_graphviz(model_vs)
+
+# *************************************************************************************************
+# B2: Sample from the posterior of the model above with a target acceptance rate of .9 or more. 
+# (Sampling takes me 7 minutes 30 seconds on my 2013 Macbook Air). 
+# Comment on the quality of the samples obtained.
+# *************************************************************************************************
+
+# Sample from the varying-slope model
+try:
+    trace_vs = vartbl['trace_vs']
+    print(f'Loaded samples for the Variable Slopes model in trace_vs.')
+except:
+    with model_vs:
+        nuts_kwargs = {'target_accept': 0.90}
+        trace_vs = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
+    vartbl['trace_vs'] = trace_vs
+    save_vartbl(vartbl, fname)
+
+# Summary of the variable-effects model
+summary_vs = pm.summary(trace_vs)
+
+# *************************************************************************************************
+# B3 Propose a method based on the reparametrization trick for multi-variate gaussians) 
+# of improving the quality of the samples obtained and implement it. 
+# (A hint can be obtained from here: 
+# https://docs.pymc.io/api/distributions/multivariate.html#pymc3.distributions.multivariate.MvNormal . 
+# Using that hint lowered the sampling time to 2.5 minutes on my laptop).
+# *************************************************************************************************
+
+# Define a varying slopes model incorporating a beta_urban term
+with pm.Model() as model_vsr:
+    # Citation: ideas to efficiently reparameterize samples from a MV Gaussian
+    # https://docs.pymc.io/api/distributions/multivariate.html#pymc3.distributions.multivariate.MvNormal
+    # Set the prior for the overall intercept
+    alpha = pm.Normal(name='alpha', mu=0.0, sd=10.0)
+    # Set the prior for the overall intercept on urban, beta
+    beta = pm.Normal(name='beta', mu=0.0, sd=10.0)
+    
+    # Sample the variances of the single factors
+    # sd_dist = pm.HalfCauchy.dist(beta=2.5, shape=num_factors)
+    sd_dist = pm.Lognormal.dist(mu=0.0, tau=1.0, shape=num_factors)
+    # The parameter nu is the prior on correlation; 0 is uniform, infinity is no corelation
+    eta = pm.Uniform('nu', 1.0, 5.0)
+    # The number of dimensions here is 2: correlation structure is bewteen alpha and beta by district
+    num_factors: int = 2
+    # Sample the correlation coefficients using the LKJ distribution
+    chol_packed = pm.LKJCholeskyCov('chol_packed', n=num_factors, eta=eta, sd_dist = sd_dist)
+    # Expand the packed Cholesky matrix to full size
+    chol = pm.Deterministic('chol', pm.expand_packed_triangular(num_factors, chol_packed))
+    # Make the covariance matrix by multiplying out the cholesky factor by its transpose
+    cov = pm.Deterministic('cov', tt.dot(chol, chol.T))
+    # The multivariate Gaussian of (alpha, beta) by district
+    # Decompose this into a "raw" part and then scale it
+    theta_raw = pm.Normal(name='theta_raw', mu=0.0, sd=1.0, shape=(num_districts, num_factors))   
+    # Now scale these to have the desired covariance structure
+    theta_district = pm.Deterministic(name='theta_district', var=tt.dot(chol, theta_raw.T).T)
+    
+    # The vector of standard deviations for each variable; size num_factors x num_factors
+    # Citation: efficient generation of sigmas and rhos from cov
+    # https://github.com/aloctavodia/Statistical-Rethinking-with-Python-and-PyMC3/blob/master/Chp_13.ipynb
+    sigmas = pm.Deterministic('sigmas', tt.sqrt(tt.diag(cov)))
+    # correlation matrix (num_factors x num_factors)
+    rhos = pm.Deterministic('rhos', tt.diag(sigmas**-1).dot(cov.dot(tt.diag(sigmas**-1))))
+
+    # Extract the standard deviations of alpha and beta, and the correlation coefficient rho
+    sigma_alpha = pm.Deterministic('sigma_alpha', sigmas[0])
+    sigma_beta = pm.Deterministic('sigma_beta', sigmas[1])
+    rho = pm.Deterministic('rho', rhos[0, 0])
+
+    # Extract alpha_district and beta_district from theta_district
+    alpha_district = pm.Deterministic('alpha_district', theta_district[:,0])
+    beta_district = pm.Deterministic('beta_district', theta_district[:, 1])
+
+    # Set the probability that each woman uses contraception in this model
+    # It depends on the district she lives in and whether the district is urban
+    # p = pm.math.invlogit(alpha + alpha_district[df.district_id] + 
+    #                      (beta + beta_district[df.district_id]) * df.urban)
+    p = pm.math.invlogit(alpha + theta_district[df.district_id, 0] + 
+                         (beta + theta_district[df.district_id, 1]) * df.urban)
+
+    # The response variable - whether this woman used contraception; modeled as Bernoulli
+    # Bind this to the observed values
+    use_contraception = pm.Bernoulli('use_contraception', p=p, observed=df['use_contraception'])
+
+# Sample from the reparameterized varying-slope model
+try:
+    trace_vs = vartbl['trace_vsr']
+    print(f'Loaded samples for the Variable Slopes Reparameterized model in trace_vsr.')
+except:
+    with model_vsr:
+        nuts_kwargs = {'target_accept': 0.90}
+        trace_vsr = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
+    vartbl['trace_vsr'] = trace_vsr
+    save_vartbl(vartbl, fname)
+
+# Summary of the variable-effects model
+summary_vsr = pm.summary(trace_vsr)
+
+# *************************************************************************************************
+# B4 Inspect the trace of the correlation between the intercepts and slopes, plotting the correlation marginal.
+# What does this correlation tell you about the pattern of contraceptive use in the sample? 
+# It might help to plot the mean (or median) varying effect estimates for both the intercepts and slopes, by district. 
+# Then you can visualize the correlation and maybe more easily think through 
+# what it means to have a particular correlation. 
+# Also plot the predicted proportion of women using contraception, with urban women on one axis and rural on the other. 
+# Finally, also plot the difference between urban and rural probabilities against rural probabilities. 
+# All of these will help you interpret your findings. 
+# (Hint: think in terms of low or high rural contraceptive use)
+# *************************************************************************************************
+
+
+# *************************************************************************************************
+# B5 Add additional "slope" terms (one-by-one) into the model for
+# (a) the centered-age of the women and
+# (b) an indicator for whether the women have a small number or large number of existing kids in the house (you can treat 1-2 kids as low, 3-4 as high, but you might want to experiment with this split).
+# Are any of these effects significant? Are any significant effects similar over the urban/rural divide?
+# *************************************************************************************************
+
+
+# *************************************************************************************************
+# B6 Use WAIC to compare your models. What are your conclusions?
+# *************************************************************************************************
