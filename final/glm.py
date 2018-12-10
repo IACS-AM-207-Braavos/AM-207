@@ -10,6 +10,7 @@ Sat Dec  8 10:05:42 2018
 # Core calculations
 import numpy as np
 import scipy.stats
+from scipy.stats import logistic
 import pandas as pd
 import pymc3 as pm
 import theano.tensor as tt
@@ -503,29 +504,66 @@ summary_vsr = pm.summary(trace_vsr)
 # (Hint: think in terms of low or high rural contraceptive use)
 # *************************************************************************************************
 
-# Plot the mean varying effect estimates for both the intercepts and slopes, by district
+# Add columns for urban and rural contraceptive users
+df['use_contraception_urban'] = df.use_contraception * df.urban
+df['use_contraception_rural'] = df.use_contraception * (1-df.urban)
+
+# Update the aggregated contraception use in each district
+agg_tbl = {
+        'woman': ['count'],
+        'urban': ['sum', 'mean'],
+        'use_contraception': ['mean'],
+        'use_contraception_urban':['sum'],
+        'use_contraception_rural':['sum'],    
+        }
+df_district = df.groupby(by=df.district_id).agg(agg_tbl)
+df_district.columns = ["_".join(x) for x in df_district.columns.ravel()]
+# Compute number of rural women
+df_district['rural_sum'] = df_district['woman_count'] - df_district['urban_sum']
+
+# Change column names to make model suffix at the end of the name
+df_district.rename(axis='columns', inplace=True, mapper=
+    {'use_contraception_mean': 'contraception',
+     'urban_sum':'urban_count',
+     'rural_sum':'rural_count',
+     'use_contraception_urban_sum': 'contraception_urban',
+     'use_contraception_rural_sum': 'contraception_rural',
+     })
+
+# Change use_contraception_urban and use_contraception_rural to rates
+df_district.contraception_urban = df_district.contraception_urban / df_district.urban_count
+df_district.contraception_rural = df_district.contraception_rural / df_district.rural_count
+
 # List of parameter names for alpha_district and beta_district for each district
 district_suffix = [f'district__{i}' for i in range(num_districts)]
 params_alpha_district = [f'alpha_{suffix}' for suffix in district_suffix]
 params_beta_district = [f'beta_{suffix}' for suffix in district_suffix]
 
-# Get the mean of alpha_district and beta_district over all the districts
+# Get the mean of alpha_district and beta_district for all the districts; mean taken over samples
 alpha_district_mean = summary_vsr.loc[params_alpha_district]['mean'].values
 beta_district_mean = summary_vsr.loc[params_beta_district]['mean'].values
+
 # Mean of "global" parameters alpha, beta, and rho
 alpha_mean = summary_vsr.loc['alpha']['mean']
 beta_mean = summary_vsr.loc['beta']['mean']
 rho_mean = summary_vsr.loc['rho']['mean']
+print(f'Mean values of the global parameters alpha, beta and rho:')
+print(f'alpha: {alpha_mean:0.4f}')
+print(f'beta:  {beta_mean:0.4f}')
+print(f'rno:   {rho_mean:0.4f}')
 
-# Plot beta vs. alpha
-fig, ax = plt.subplots(figsize=[12,8])
-ax.set_title('Mean Beta vs. Mean Alpha By District')
-ax.set_xlabel('Mean alpha_district for Each District over Samples')
-ax.set_ylabel('Mean beta_district for Each District over Samples')
-ax.plot(alpha_district_mean, beta_district_mean, label='data', color='b', linewidth=0, marker='o', markersize=8)
-ax.plot(alpha_district_mean, alpha_district_mean * rho_mean, label=r'$\rho \alpha$', linewidth=4, color='r')
-ax.legend()
-ax.grid()
+# Add alpha_district, beta_district, alpha_eff, beta_eff
+df_district['alpha_district'] = alpha_district_mean
+df_district['beta_district'] = beta_district_mean
+df_district['alpha_eff'] = alpha_mean + alpha_district_mean
+df_district['beta_eff'] = beta_mean + beta_district_mean
+
+# Compute predicted probability for urban and rural contraceptive use
+df_district['pred_urban'] = logistic.cdf(df_district.alpha_eff + df_district.beta_eff)
+df_district['pred_rural'] = logistic.cdf(df_district.alpha_eff)
+
+display_cols = ['woman_count', 'urban_count', 'rural_count', 'contraception_urban', 'contraception_rural', 'contraception',
+               'alpha_eff', 'beta_eff', 'pred_urban', 'pred_rural']
 
 
 # *************************************************************************************************
