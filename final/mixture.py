@@ -5,6 +5,7 @@ Sun Dec  9 23:25:22 2018
 
 import numpy as np
 import pymc3 as pm
+from theano.tensor.nnet import softmax
 import pandas as pd
 
 # *************************************************************************************************
@@ -22,7 +23,7 @@ import pandas as pd
 # Notice both the uneven sampling (more towards the center), and the "more than one y" for a given x.
 
 # Here the three regression lines work in different regions of f . 
-# We want a pricipled way to sample from this model and to be able to produce posteriors and posterior-predictives.
+# We want a principled way to sample from this model and to be able to produce posteriors and posterior-predictives.
 
 # There are 3 parts to this model. First the means of the gaussians in the mixture are modeled with linear regression 
 # as shown in the picture above. 
@@ -47,11 +48,37 @@ x = df.target.values
 with pm.Model() as model:
     # The number of functions
     num_funcs: int = 3
+    # Setting for mu and sigma in normal priors
+    normal_prior_mu = 0.0
+    normal_prior_sd = 5.0
+
     # The alpha parameter for the three regression lines
-    alpha = pm.Normal(mu=0.0, sd=5.0, shape=num_funcs)
+    alpha = pm.Normal(name='alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
     # The beta parameter for the three regression lines
-    beta = pm.Normal(mu=0.0, sd=5.0, shape_num_funcs)
-    # The 
+    beta = pm.Normal(name='beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
+    # The mean of the regression line is a deterministic function of x
+    reg_mean = pm.Deterministic(name='reg_mean', alpha + beta * x)
+    
+    # The intercept of log-sigma for each gaussian
+    log_sigma_alpha = pm.Normal(name='log_sigma_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
+    # The slope of log-sigma for each gaussian
+    log_sigma_beta = pm.Normal(name='log_sigma_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
+
+    # log_sigma for each gaussian is deterministic; include 0.01 offset
+    log_sigma_shift = 0.01
+    log_sigma = pm.Deteriministic(name='log_sigma', log_sigma_alpha + log_sigma_beta * x + log_sigma_shift)
+    
+    # Sigma for each gaussian is deterministic
+    reg_sigma = pm.Deterministic('sigma', pm.math.exp(log_sigma))
+    
+    # Weighting factors lambda_i are modeled as linear regressions also
+    weight_alpha = pm.Normal(name='weight_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
+    weight_beta = pm.Normal(name='weight_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
+
+    # The weighting functions lambda are a softmax of alpha + beta * x
+    weight = pm.Deterministic('weight', softmax(weight_alpha + weight_beta * x))
+    
+    
     
 
 # *************************************************************************************************

@@ -137,6 +137,7 @@ try:
     trace_fe = vartbl['trace_fe']
     print(f'Loaded samples for the Fixed Effects model in trace_fe.')
 except:
+    print(f'Sampling from Fixed Effect model...')
     with model_fe:
         trace_fe = pm.sample(draws=num_samples, tune=num_tune, chains=chains, cores=cores)
     vartbl['trace_fe'] = trace_fe
@@ -187,6 +188,7 @@ try:
     trace_ve = vartbl['trace_ve']
     print(f'Loaded samples for the Variable Effects model in trace_ve.')
 except:
+    print(f'Sampling from Variable Effect model...')
     with model_ve:
         trace_ve = pm.sample(draws=num_samples, tune=num_tune, chains=chains, cores=cores)
     vartbl['trace_ve'] = trace_ve
@@ -417,6 +419,7 @@ try:
     trace_vs = vartbl['trace_vs']
     print(f'Loaded samples for the Variable Slopes model in trace_vs.')
 except:
+    print(f'Sampling from Variable Slopes model...')
     with model_vs:
         nuts_kwargs = {'target_accept': 0.90}
         trace_vs = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
@@ -494,6 +497,7 @@ try:
     trace_vsr = vartbl['trace_vsr']
     print(f'Loaded samples for the Variable Slopes Reparameterized model in trace_vsr.')
 except:
+    print(f'Sampling from Variable Slopes Reparameterized model...')
     with model_vsr:
         nuts_kwargs = {'target_accept': 0.90}
         trace_vsr = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
@@ -625,23 +629,19 @@ with pm.Model() as model_DUA:
     # Bind this to the observed values
     use_contraception = pm.Bernoulli('use_contraception', p=p, observed=df['use_contraception'])
 
-# Sample from the DAU mode
+# Sample from the DUA model
 try:
     trace_DUA = vartbl['trace_DUA']
     print(f'Loaded samples for the District-Urban-Age model in trace_DUA.')
 except:
+    print(f'Sampling from District-Urban-Age model...')
     with model_DUA:
         nuts_kwargs = {'target_accept': 0.90}
-<<<<<<< HEAD
         trace_DUA = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
-=======
-        trace_DUA = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
->>>>>>> e35e6fa5b80e74a99bb26c9fa3ae2e634fa05b49
     vartbl['trace_DUA'] = trace_DUA
     save_vartbl(vartbl, fname)
 
 # *************************************************************************************************
-
 # Add a new column to the dataframe, many_kids, indicating whether the woman has 3 or more kids at home
 df['many_kids'] = (df.living_children > 3) * 1
 
@@ -695,13 +695,10 @@ try:
     trace_DUAK = vartbl['trace_DUAK']
     print(f'Loaded samples for the District-Urban-Age-Kids model in trace_DUAK.')
 except:
+    print(f'Sampling from District-Urban-Age-Kids model...')
     with model_DUAK:
         nuts_kwargs = {'target_accept': 0.90}
-<<<<<<< HEAD
         trace_DUAK = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
-=======
-        trace_DUAK = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
->>>>>>> e35e6fa5b80e74a99bb26c9fa3ae2e634fa05b49
     vartbl['trace_DUAK'] = trace_DUAK
     save_vartbl(vartbl, fname)
 
@@ -711,17 +708,19 @@ except:
 
 # Compute WAIC for each model under consideration
 waic_fe = pm.waic(trace_fe, model_fe)
-waic_ve = pm.waic(trace_fe, model_ve)
-# waic_DUA = pm.waic(trace_DUA, model_DUA)
-# waic_DUAK = pm.waic(trace_DUAK, model_DUAK)
+waic_ve = pm.waic(trace_ve, model_ve)
+waic_DUA = pm.waic(trace_DUA, model_DUA)
+waic_DUAK = pm.waic(trace_DUAK, model_DUAK)
 
 # Set the names of these models
 model_fe.name = 'FixedEffect'
 model_ve.name = 'VariableEffect'
-# model_DUA.name = 'DistrictUrbanAge'
-# model_DUAK.name = 'DistrictUrbanAgeKids'
+model_DUA.name = 'DistrictUrbanAge'
+model_DUAK.name = 'DistrictUrbanAgeKids'
 
 # Compare the models
 df_model_comp = pm.compare({model_fe: trace_fe,
-                            model_ve: trace_ve})
+                            model_ve: trace_ve,
+                            model_DUA: trace_DUA,
+                            model_DUAK: trace_DUAK})
 
