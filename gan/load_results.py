@@ -81,7 +81,7 @@ def process(exp_name: str):
         
     # Plot these results
     plot_results(df, f'{exp_name}')
-    plot_results(df[0:100], f'{exp_name}_10k')
+    # plot_results(df[0:100], f'{exp_name}_10k')
 
 
 def main():
