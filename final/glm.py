@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import seaborn.apionly as sns
 from IPython.display import display
 # Miscellaneous
+import os
 import warnings
 from am207_utils import load_vartbl, save_vartbl
 from typing import Dict
@@ -95,8 +96,18 @@ df_district = df.groupby(by=df.district_id).agg(agg_tbl)
 df_district.columns = ["_".join(x) for x in df_district.columns.ravel()]
 
 # Set the number of samples for this problem (used in multiple parts)
-num_samples: int = 11000
+num_samples: int = 10000
 num_tune: int = 1000
+
+# Set number of chains
+chains: int = 2
+
+# Set number of cores depending on the platform
+if os.name == 'nt':
+    cores = 1
+else:
+    cores = None    
+
 
 # Part A
 # We will use use.contraception as a Bernoulli response variable.
@@ -127,7 +138,7 @@ try:
     print(f'Loaded samples for the Fixed Effects model in trace_fe.')
 except:
     with model_fe:
-        trace_fe = pm.sample(draws=num_samples, tune=num_tune, chains=2, cores=1)
+        trace_fe = pm.sample(draws=num_samples, tune=num_tune, chains=chains, cores=cores)
     vartbl['trace_fe'] = trace_fe
     save_vartbl(vartbl, fname)
 
@@ -166,7 +177,7 @@ with pm.Model() as model_ve:
     alpha_district = pm.Normal(name='alpha_district', mu=0.0, sd=sigma, shape=num_districts)    
     # Set the probability that each woman uses contraception in this model
     # It depends only on the district she lives in
-    p = pm.math.invlogit(alpha + alpha_district[df.district_id])
+    p = pm.math.invlogit(alpha_district[df.district_id])
     # The response variable - whether this woman used contraception; modeled as Bernoulli
     # Bind this to the observed values
     use_contraception = pm.Bernoulli('use_contraception', p=p, observed=df['use_contraception'])
@@ -177,7 +188,7 @@ try:
     print(f'Loaded samples for the Variable Effects model in trace_ve.')
 except:
     with model_ve:
-        trace_ve = pm.sample(draws=num_samples, tune=num_tune, chains=2, cores=1)
+        trace_ve = pm.sample(draws=num_samples, tune=num_tune, chains=chains, cores=cores)
     vartbl['trace_ve'] = trace_ve
     save_vartbl(vartbl, fname)
 
@@ -408,7 +419,7 @@ try:
 except:
     with model_vs:
         nuts_kwargs = {'target_accept': 0.90}
-        trace_vs = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
+        trace_vs = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
     vartbl['trace_vs'] = trace_vs
     save_vartbl(vartbl, fname)
 
@@ -468,7 +479,7 @@ with pm.Model() as model_vsr:
     beta_district = pm.Deterministic('beta_district', theta_district[:, 1])
 
     # Set the probability that each woman uses contraception in this model
-    # It depends on the district she lives in and whether the district is urban
+    # It depends on the district she lives in and whether she lives in an urban area
     # p = pm.math.invlogit(alpha + alpha_district[df.district_id] + 
     #                      (beta + beta_district[df.district_id]) * df.urban)
     p = pm.math.invlogit(alpha + theta_district[df.district_id, 0] + 
@@ -485,7 +496,7 @@ try:
 except:
     with model_vsr:
         nuts_kwargs = {'target_accept': 0.90}
-        trace_vsr = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
+        trace_vsr = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
     vartbl['trace_vsr'] = trace_vsr
     save_vartbl(vartbl, fname)
 
@@ -569,11 +580,140 @@ display_cols = ['woman_count', 'urban_count', 'rural_count', 'contraception_urba
 # *************************************************************************************************
 # B5 Add additional "slope" terms (one-by-one) into the model for
 # (a) the centered-age of the women and
-# (b) an indicator for whether the women have a small number or large number of existing kids in the house (you can treat 1-2 kids as low, 3-4 as high, but you might want to experiment with this split).
+# (b) an indicator for whether the women have a small number or large number of existing kids in the house 
+# (you can treat 1-2 kids as low, 3-4 as high, but you might want to experiment with this split).
 # Are any of these effects significant? Are any significant effects similar over the urban/rural divide?
 # *************************************************************************************************
 
+# Model with slope for the age of the woman;
+# model_DUA stands for District, Urban, Age
+with pm.Model() as model_DUA:
+    # Set the prior for the overall intercept
+    alpha = pm.Normal(name='alpha', mu=0.0, sd=10.0)
+    # Set the prior for the overall intercept on urban, beta_age
+    beta_urban = pm.Normal(name='beta_urban', mu=0.0, sd=10.0)
+
+    # Set the prior for the slope on age, beta_age; this is fixed only, no by district version
+    # Set the sd of beta_age to 1.0 not 10.0, because the standard deviation of age_centered is 9.0
+    beta_age = pm.Normal(name='beta_age', mu=0.0, sd=1.0)    
+    
+    # Sample the variances of the single factors by district
+    sd_dist = pm.Lognormal.dist(mu=0.0, tau=1.0, shape=num_factors)
+    # The parameter nu is the prior on correlation; 0 is uniform, infinity is no corelation
+    eta = pm.Uniform('nu', 1.0, 5.0)
+    # The number of dimensions here is 2: correlation structure is bewteen alpha and beta by district
+    num_factors: int = 2
+    # Sample the correlation coefficients using the LKJ distribution
+    chol_packed = pm.LKJCholeskyCov('chol_packed', n=num_factors, eta=eta, sd_dist = sd_dist)
+    # Expand the packed Cholesky matrix to full size
+    chol = pm.Deterministic('chol', pm.expand_packed_triangular(num_factors, chol_packed))
+    # Make the covariance matrix by multiplying out the cholesky factor by its transpose
+    cov = pm.Deterministic('cov', tt.dot(chol, chol.T))
+    # The multivariate Gaussian of (alpha, beta) by district
+    # Decompose this into a "raw" part and then scale it
+    theta_raw = pm.Normal(name='theta_raw', mu=0.0, sd=1.0, shape=(num_districts, num_factors))   
+    # Now scale these to have the desired covariance structure
+    theta_district = pm.Deterministic(name='theta_district', var=tt.dot(chol, theta_raw.T).T)
+    
+    # Set the probability that each woman uses contraception in this model
+    # It depends on (1) district where she lives (2) whether she lives in an urban area (3) her age
+    p = pm.math.invlogit(alpha + theta_district[df.district_id, 0] + 
+                         (beta_urban + theta_district[df.district_id, 1]) * df.urban + 
+                         beta_age * df.age_centered)
+
+    # The response variable - whether this woman used contraception; modeled as Bernoulli
+    # Bind this to the observed values
+    use_contraception = pm.Bernoulli('use_contraception', p=p, observed=df['use_contraception'])
+
+# Sample from the DAU mode
+try:
+    trace_DUA = vartbl['trace_DUA']
+    print(f'Loaded samples for the District-Urban-Age model in trace_DUA.')
+except:
+    with model_DUA:
+        nuts_kwargs = {'target_accept': 0.90}
+        trace_DUA = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
+    vartbl['trace_DUA'] = trace_DUA
+    save_vartbl(vartbl, fname)
+
+# *************************************************************************************************
+
+# Add a new column to the dataframe, many_kids, indicating whether the woman has 3 or more kids at home
+df['many_kids'] = (df.living_children > 3) * 1
+
+# Model with slopes for the age of the woman and whether she has a large number of children;
+# model_DUAK stands for District, Urban, Age, Kids
+with pm.Model() as model_DUAK:
+    # Set the prior for the overall intercept
+    alpha = pm.Normal(name='alpha', mu=0.0, sd=10.0)
+    # Set the prior for the overall intercept on urban, beta_age
+    beta_urban = pm.Normal(name='beta_urban', mu=0.0, sd=10.0)
+
+    # Set the prior for the slope on age, beta_age; this is fixed only, no by district version
+    # Set the sd of beta_age to 1.0 not 10.0, because the standard deviation of age_centered is 9.0
+    beta_age = pm.Normal(name='beta_age', mu=0.0, sd=1.0)
+
+    # Set the prior for the slope on many_kids, beta_kids
+    beta_kids = pm.Normal(name='beta_kids', mu=0.0, sd=10.0)
+    
+    # Sample the variances of the single factors by district
+    sd_dist = pm.Lognormal.dist(mu=0.0, tau=1.0, shape=num_factors)
+    # The parameter nu is the prior on correlation; 0 is uniform, infinity is no corelation
+    eta = pm.Uniform('nu', 1.0, 5.0)
+    # The number of dimensions here is 2: correlation structure is bewteen alpha and beta by district
+    num_factors: int = 2
+    # Sample the correlation coefficients using the LKJ distribution
+    chol_packed = pm.LKJCholeskyCov('chol_packed', n=num_factors, eta=eta, sd_dist = sd_dist)
+    # Expand the packed Cholesky matrix to full size
+    chol = pm.Deterministic('chol', pm.expand_packed_triangular(num_factors, chol_packed))
+    # Make the covariance matrix by multiplying out the cholesky factor by its transpose
+    cov = pm.Deterministic('cov', tt.dot(chol, chol.T))
+    # The multivariate Gaussian of (alpha, beta) by district
+    # Decompose this into a "raw" part and then scale it
+    theta_raw = pm.Normal(name='theta_raw', mu=0.0, sd=1.0, shape=(num_districts, num_factors))   
+    # Now scale these to have the desired covariance structure
+    theta_district = pm.Deterministic(name='theta_district', var=tt.dot(chol, theta_raw.T).T)
+    
+    # Set the probability that each woman uses contraception in this model
+    # It depends on (1) district where she lives (2) whether she lives in an urban area 
+    # (3) her age (4) whether she has a lot of kids (3+) living at home
+    p = pm.math.invlogit(alpha + theta_district[df.district_id, 0] + 
+                         (beta_urban + theta_district[df.district_id, 1]) * df.urban + 
+                         beta_age * df.age_centered + 
+                         beta_kids * df.many_kids)
+
+    # The response variable - whether this woman used contraception; modeled as Bernoulli
+    # Bind this to the observed values
+    use_contraception = pm.Bernoulli('use_contraception', p=p, observed=df['use_contraception'])
+
+# Sample from the DUAK model
+try:
+    trace_DUAK = vartbl['trace_DUAK']
+    print(f'Loaded samples for the District-Urban-Age-Kids model in trace_DUAK.')
+except:
+    with model_DUAK:
+        nuts_kwargs = {'target_accept': 0.90}
+        trace_DUAK = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
+    vartbl['trace_DUAK'] = trace_DUAK
+    save_vartbl(vartbl, fname)
 
 # *************************************************************************************************
 # B6 Use WAIC to compare your models. What are your conclusions?
 # *************************************************************************************************
+
+# Compute WAIC for each model under consideration
+waic_fe = pm.waic(trace_fe, model_fe)
+waic_ve = pm.waic(trace_fe, model_ve)
+# waic_DUA = pm.waic(trace_DUA, model_DUA)
+# waic_DUAK = pm.waic(trace_DUAK, model_DUAK)
+
+# Set the names of these models
+model_fe.name = 'FixedEffect'
+model_ve.name = 'VariableEffect'
+# model_DUA.name = 'DistrictUrbanAge'
+# model_DUAK.name = 'DistrictUrbanAgeKids'
+
+# Compare the models
+df_model_comp = pm.compare({model_fe: trace_fe,
+                            model_ve: trace_ve})
+
