@@ -632,7 +632,11 @@ try:
 except:
     with model_DUA:
         nuts_kwargs = {'target_accept': 0.90}
+<<<<<<< HEAD
         trace_DUA = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
+=======
+        trace_DUA = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
+>>>>>>> e35e6fa5b80e74a99bb26c9fa3ae2e634fa05b49
     vartbl['trace_DUA'] = trace_DUA
     save_vartbl(vartbl, fname)
 
@@ -693,7 +697,11 @@ try:
 except:
     with model_DUAK:
         nuts_kwargs = {'target_accept': 0.90}
+<<<<<<< HEAD
         trace_DUAK = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=chains, cores=cores)
+=======
+        trace_DUAK = pm.sample(draws=num_samples, tune=num_tune, nuts_kwargs=nuts_kwargs, chains=2, cores=1)
+>>>>>>> e35e6fa5b80e74a99bb26c9fa3ae2e634fa05b49
     vartbl['trace_DUAK'] = trace_DUAK
     save_vartbl(vartbl, fname)
 
