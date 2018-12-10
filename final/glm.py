@@ -33,8 +33,10 @@ vartbl: Dict = load_vartbl(fname)
 # https://stackoverflow.com/questions/45720153/python-multiprocessing-error-attributeerror-module-main-has-no-attribute
 __spec__ = "ModuleSpec(name='builtins', loader=<class '_frozen_importlib.BuiltinImporter'>)"
 
-# Silence warnings (too noisy)
-warnings.simplefilter('ignore')
+# Turn off deprecation warning (too noisy)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=mpl.MatplotlibDeprecationWarning)
 
 # *************************************************************************************************
 # Q1: GLMs with correlation
@@ -370,7 +372,7 @@ with pm.Model() as model_vs:
     # Extract the standard deviations of alpha and beta, and the correlation coefficient rho
     sigma_alpha = pm.Deterministic('sigma_alpha', sigmas[0])
     sigma_beta = pm.Deterministic('sigma_beta', sigmas[1])
-    rho = pm.Deterministic('rho', rhos[0, 0])
+    rho = pm.Deterministic('rho', rhos[0, 1])
 
     # Extract alpha_district and beta_district from theta_district
     alpha_district = pm.Deterministic('alpha_district', theta_district[:,0])
@@ -458,7 +460,7 @@ with pm.Model() as model_vsr:
     # Extract the standard deviations of alpha and beta, and the correlation coefficient rho
     sigma_alpha = pm.Deterministic('sigma_alpha', sigmas[0])
     sigma_beta = pm.Deterministic('sigma_beta', sigmas[1])
-    rho = pm.Deterministic('rho', rhos[0, 0])
+    rho = pm.Deterministic('rho', rhos[0, 1])
 
     # Extract alpha_district and beta_district from theta_district
     alpha_district = pm.Deterministic('alpha_district', theta_district[:,0])
@@ -477,7 +479,7 @@ with pm.Model() as model_vsr:
 
 # Sample from the reparameterized varying-slope model
 try:
-    trace_vs = vartbl['trace_vsr']
+    trace_vsr = vartbl['trace_vsr']
     print(f'Loaded samples for the Variable Slopes Reparameterized model in trace_vsr.')
 except:
     with model_vsr:
@@ -500,6 +502,30 @@ summary_vsr = pm.summary(trace_vsr)
 # All of these will help you interpret your findings. 
 # (Hint: think in terms of low or high rural contraceptive use)
 # *************************************************************************************************
+
+# Plot the mean varying effect estimates for both the intercepts and slopes, by district
+# List of parameter names for alpha_district and beta_district for each district
+district_suffix = [f'district__{i}' for i in range(num_districts)]
+params_alpha_district = [f'alpha_{suffix}' for suffix in district_suffix]
+params_beta_district = [f'beta_{suffix}' for suffix in district_suffix]
+
+# Get the mean of alpha_district and beta_district over all the districts
+alpha_district_mean = summary_vsr.loc[params_alpha_district]['mean'].values
+beta_district_mean = summary_vsr.loc[params_beta_district]['mean'].values
+# Mean of "global" parameters alpha, beta, and rho
+alpha_mean = summary_vsr.loc['alpha']['mean']
+beta_mean = summary_vsr.loc['beta']['mean']
+rho_mean = summary_vsr.loc['rho']['mean']
+
+# Plot beta vs. alpha
+fig, ax = plt.subplots(figsize=[12,8])
+ax.set_title('Mean Beta vs. Mean Alpha By District')
+ax.set_xlabel('Mean alpha_district for Each District over Samples')
+ax.set_ylabel('Mean beta_district for Each District over Samples')
+ax.plot(alpha_district_mean, beta_district_mean, label='data', color='b', linewidth=0, marker='o', markersize=8)
+ax.plot(alpha_district_mean, alpha_district_mean * rho_mean, label=r'$\rho \alpha$', linewidth=4, color='r')
+ax.legend()
+ax.grid()
 
 
 # *************************************************************************************************
