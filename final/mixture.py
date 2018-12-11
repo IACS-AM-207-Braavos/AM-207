@@ -3,10 +3,16 @@ Michael S. Emanuel
 Sun Dec  9 23:25:22 2018
 """
 
+import pandas as pd
 import numpy as np
 import pymc3 as pm
+from pymc3.variational.callbacks import CheckParametersConvergence
+import theano.tensor as tt
 from theano.tensor.nnet import softmax
-import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from am207_utils import load_vartbl, save_vartbl
+from typing import Dict
 
 # *************************************************************************************************
 # Q2: Mixture of experts and mixture density networks to solve inverse problems
@@ -33,10 +39,30 @@ import pandas as pd
 # These mixing probabilities, the λ s will be modeled as a softmax regression 
 # (ie do a linear regression and softmax it to get 3 probabilities).
 
+# *************************************************************************************************
+# Load persisted table of variables
+fname: str = 'mixture.pickle'
+vartbl: Dict = load_vartbl(fname)
+
+# Set plot style
+mpl.rcParams.update({'font.size': 20})
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# *************************************************************************************************
 # Load the data
 df = pd.read_csv('one-to-many.csv')
+x = df.x.values
 y = df.target.values
-x = df.target.values
+
+# Exploratory plot of the data
+fig, ax = plt.subplots(figsize=[12,8])
+ax.set_title('One to Many Training Data')
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.plot(x, y, color='b', linewidth=0, marker='o', markersize=4)
+ax.grid()
 
 # *************************************************************************************************
 # A1 Write a pymc3 model for this problem. 
@@ -45,57 +71,219 @@ x = df.target.values
 # ie we want some data in every cluster. 
 # (Thus to get the final σ, you will exponentiate your regression for log(σ) and add 0.01.)
 
+# Shift applied to sigmas
+sigma_shift = 0.01
+
 with pm.Model() as model:
+    # The number of data points
+    N: int = len(x)
     # The number of functions
-    num_funcs: int = 3
+    K: int = 3
+
     # Setting for mu and sigma in normal priors
     normal_prior_mu = 0.0
     normal_prior_sd = 5.0
 
-    # The alpha parameter for the three regression lines
-    alpha = pm.Normal(name='alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
-    # The beta parameter for the three regression lines
-    beta = pm.Normal(name='beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
-    # The mean of the regression line is a deterministic function of x
-    reg_mean = pm.Deterministic(name='reg_mean', alpha + beta * x)
-    
-    # The intercept of log-sigma for each gaussian
-    log_sigma_alpha = pm.Normal(name='log_sigma_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
-    # The slope of log-sigma for each gaussian
-    log_sigma_beta = pm.Normal(name='log_sigma_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
+    # Reshape x to an Nx1 vector (makes matrix multiplications easier to follow)
+    xt = tt.reshape(x, (N,1))
 
-    # log_sigma for each gaussian is deterministic; include 0.01 offset
-    log_sigma_shift = 0.01
-    log_sigma = pm.Deteriministic(name='log_sigma', log_sigma_alpha + log_sigma_beta * x + log_sigma_shift)
+    # The parameters for the three regression lines; mean(x) = alpha + x*beta; shape (K)
+    alpha = pm.Normal(name='alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    beta = pm.Normal(name='beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    # Reshape into row vectors
+    alpha_row = tt.reshape(alpha, (1,K))
+    beta_row = tt.reshape(beta, (1,K))
+    # The mean of the regression line, mu, is a deterministic function of x = alpha + x * beta; shape (N,K)
+    mu = tt.add(alpha_row, tt.dot(xt, beta_row))
     
-    # Sigma for each gaussian is deterministic
-    reg_sigma = pm.Deterministic('sigma', pm.math.exp(log_sigma))
+    # The parameters for the regression line of log-sigma for each gaussian
+    log_sigma_alpha = pm.Normal(name='log_sigma_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    log_sigma_beta = pm.Normal(name='log_sigma_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    # Reshape into row vectors
+    log_sigma_alpha_row = tt.reshape(log_sigma_alpha, (1,K))
+    log_sigma_beta_row = tt.reshape(log_sigma_beta, (1,K))
+    # log_sigma for each gaussian is deterministic
+    log_sigma = tt.add(log_sigma_alpha_row, tt.dot(xt, log_sigma_beta_row))
     
-    # Weighting factors lambda_i are modeled as linear regressions also
-    weight_alpha = pm.Normal(name='weight_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
-    weight_beta = pm.Normal(name='weight_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=num_funcs)
-
-    # The weighting functions lambda are a softmax of alpha + beta * x
-    weight = pm.Deterministic('weight', softmax(weight_alpha + weight_beta * x))
+    # Sigma for each gaussian is deterministic; include shift of 0.01; shape (N,K)    
+    sigma = tt.exp(log_sigma) + sigma_shift
     
+    # Weighting factors weight_i are modeled as linear regressions also
+    weight_alpha = pm.Normal(name='weight_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    weight_beta = pm.Normal(name='weight_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    # Reshape into row vectors
+    weight_alpha_row = tt.reshape(weight_alpha, (1,K))
+    weight_beta_row = tt.reshape(weight_beta, (1,K))
     
+    # The weighting factors are a softmax of weight_alpha + x*weight_beta; shape (N,K)
+    weight = softmax(weight_alpha_row + tt.dot(xt, weight_beta_row))
+    
+    # Sample points using a pymc3 NormalMixture
+    # See lecture notes 25, p. 44
+    y_obs = pm.NormalMixture('y_obs', w=weight, mu=mu, sd=sigma, observed=y)
     
 
 # *************************************************************************************************
 # A2 Fit this model variationally for about 50,000 iterations using the adam optimizer. 
-# (obj_optimizer=pm.adam()) Plot the ELBO to make sure you have converged. 
-# Print summaries and traceplots for the means,  σ s and probabilities.
+# (obj_optimizer=pm.adam()) 
+# Plot the ELBO to make sure you have converged. 
+# Print summaries and traceplots for the means, σ's and probabilities.
+
+# Number of iterations for ADVI fit
+num_iters: int = 50000
+
+# Fit the model using ADVI
+try:
+    advi = vartbl['advi']
+    print(f'Loaded ADVI fit for Guassian Mixture Model.')
+except:
+    print(f'Running ADVI fit for Guassian Mixture Model...')
+    advi = pm.ADVI(model=model)
+    advi.fit(n=num_iters, obj_optimizer=pm.adam(), 
+             callbacks=[CheckParametersConvergence()])
+    vartbl['advi'] = advi
+    save_vartbl(vartbl, fname)
+
+#    # Fit the model using Full Rank ADVI
+#    try:
+#        advi_fr = vartbl['advi_fr']
+#        print(f'Loaded Full Rank ADVI fit for Guassian Mixture Model.')
+#    except:
+#        print(f'Running Full Rank ADVI fit for Guassian Mixture Model...')
+#        advi_fr = pm.FullRankADVI(model=model)
+#        advi.fit(n=num_iters, obj_optimizer=pm.adam(), 
+#                 callbacks=[CheckParametersConvergence()])
+#        vartbl['advi_fr'] = advi_fr
+#        save_vartbl(vartbl, fname)
+
+# Plot the ELBO
+elbo = -advi.hist
+fig, ax = plt.subplots(figsize=[12,8])
+ax.set_title('ELBO for ADVI Fit of Gaussian Mixture Model')
+ax.set_xlabel('Iteration')
+ax.set_ylabel('ELBO')
+ax.plot(elbo[::10], color='b')
+ax.grid()
+plt.close(fig)
+
+# *************************************************************************************************
+# Number of samples to draw
+num_samples: int = 10000
+
+# Draw parameter samples (trace)
+# See lecture 24, p. 33 for example
+try:
+    trace = vartbl['trace']
+    print(f'Loaded trace from ADVI fit of Gaussian Mixture Model.')
+except:
+    print(f'Drawing posterior samples (parameters) from ADVI fit of Gaussian Mixture Model...')
+    trace = advi.approx.sample(num_samples)
+    vartbl['trace'] = trace
+    save_vartbl(vartbl, fname)
+
+# Print summaries and traceplots for the means, σ's and probabilities.
+# figs = pm.traceplot(trace)
 
 
 # *************************************************************************************************
 # A3 Plot the mean posteriors with standard deviations against x. 
-# Also produce a diagram like the one above to show the mean"s with standard deviations 
+# Also produce a diagram like the one above to show the means with standard deviations 
 # showing their uncertainty overlaid on the data.
 
+# Posterior means for the six parameters
+post_means = dict()
+post_means['alpha'] = np.mean(trace['alpha'], axis=0)
+post_means['beta'] = np.mean(trace['beta'], axis=0)
+post_means['log_sigma_alpha'] = np.mean(trace['log_sigma_alpha'], axis=0)
+post_means['log_sigma_beta'] = np.mean(trace['log_sigma_beta'], axis=0)
+post_means['weight_alpha'] = np.mean(trace['weight_alpha'], axis=0)
+post_means['weight_beta'] = np.mean(trace['weight_beta'], axis=0)
+
+# Generate evenly sorted arrays for plotting
+xx = np.linspace(0.0, 1.0, 200)
+
+# Compute mu and sigma for the three regressions
+mu = np.outer(xx, post_means['beta']) + post_means['alpha']
+log_sigma = np.outer(xx, post_means['log_sigma_beta']) + post_means['log_sigma_alpha']
+sigma = np.exp(log_sigma) + sigma_shift
+mu_lo = mu - 2.0 * sigma
+mu_hi = mu + 2.0 * sigma
+
+# Generate plot similar to one in the problem
+fig, ax = plt.subplots(figsize=[12,12])
+ax.set_title('Mixture Model: 3 Gaussians')
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_xlim(0.0, 1.0)
+ax.set_ylim(0.0, 1.0)
+ax.grid()
+
+# Plot the data in black
+ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=3, alpha=0.5)
+# Plot the three lines; match colors to problem
+ax.plot(xx, mu[:,0], color='r')
+ax.plot(xx, mu[:,1], color='b')
+ax.plot(xx, mu[:,2], color='g')
+# Fill in the color between the lower and upper bounds of each line
+ax.fill_between(xx, mu_lo[:,0], mu_hi[:,0], color='r', alpha=0.05)
+ax.fill_between(xx, mu_lo[:,1], mu_hi[:,1], color='b', alpha=0.05)
+ax.fill_between(xx, mu_lo[:,2], mu_hi[:,2], color='g', alpha=0.05)
+
+# Compute the weights on each model
+weight_z = np.outer(xx, post_means['weight_beta']) + post_means['weight_alpha']
+# Apply the softmax function to the regression sum to get the predicted weights
+weight = softmax(weight_z).eval()
+
+# Generate plot with the weights
+fig, ax = plt.subplots(figsize=[12,12])
+ax.set_title('Mixture Model: Weights')
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_xlim(0.0, 1.0)
+ax.set_ylim(0.0, 1.0)
+ax.grid()
+# Plot the weights
+ax.plot(xx, weight[:,0], color='r')
+ax.plot(xx, weight[:,1], color='b')
+ax.plot(xx, weight[:,2], color='g')
 
 # *************************************************************************************************
 # A4 Plot the posterior predictive (mean and variance) as a function of x) for this model 
 # (using sample_ppc for example). Why does the posterior predictive look nothing like the data?
+
+# Draw posterior predictive
+# See lecture 24, p. 33 for example
+try:
+    pred = vartbl['pred']
+    print(f'Loaded posterior predictive from ADVI fit of Gaussian Mixture Model.')
+except:
+    print(f'Drawing posterior predictive from ADVI fit of Gaussian Mixture Model...')
+    pred = pm.sample_ppc(trace, model=model)
+    vartbl['pred'] = pred
+    save_vartbl(vartbl, fname)
+
+# Extract y_pred as an array; shape (num_samples, N)
+y_pred = pred['y_obs']
+# Mean and standard deviation of y
+y_mean = np.mean(y_pred, axis=0)
+y_std = np.std(y_pred, axis=0)
+
+# Plot posterior mean and std
+fig, ax = plt.subplots(figsize=[12,12])
+ax.set_title('Mixture Model: Posterior Means +/- 1 SD')
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_xlim(0.0, 1.0)
+ax.set_ylim(0.0, 1.0)
+ax.grid()
+
+# Plot posterior mean of y, Shifted +/- 1 SD
+ax.plot(x, y_mean, color='k', linewidth=0, marker='o', label='mean')
+ax.plot(x, y_mean-y_std, color='b', linewidth=0, marker='o', label='mean-std')
+ax.plot(x, y_mean+y_std, color='r', linewidth=0, marker='o', label='mean+std')
+# The standard deviation
+ax.plot(x, y_std, color='magenta', linewidth=0, marker='o', label='std', markersize=3, alpha=0.2)
+ax.legend()
 
 
 # *************************************************************************************************
@@ -111,3 +299,41 @@ with pm.Model() as model:
 # the entire trace of  μ  and  σ  and  λ . 
 # The former diagram may look something like this:
 
+# Compute the weights on each model
+# This looks similar to the chart above, but that one used the array 'xx' of 200 evenly sampled x points
+# This one uses array 'x' of the actual data; 1000 points, not sorted
+weight_z = np.outer(x, post_means['weight_beta']) + post_means['weight_alpha']
+weight = softmax(weight_z).eval()
+
+# Initialize arrays for the clusters and predictions
+cluster = np.zeros(N, dtype=np.int8)
+y_pred_cl = np.zeros(N)
+# Sample N posterior predictive points
+for i in range(N):
+    # Sample the cluster based on the probabilities above
+    cluster_i = np.random.choice(a=3, p=weight[i])
+    # The mean of the distribution is a combination of the sampled alpha and beta
+    mu_i = trace['alpha'][i, cluster_i] + trace['beta'][i, cluster_i] * x[i]
+    # The standard deviation of the distribution is based on the log_sigma calculation
+    log_sigma_i = trace['log_sigma_alpha'][i, cluster_i] + trace['log_sigma_beta'][i, cluster_i] * x[i]
+    sigma_i = np.exp(log_sigma_i) + sigma_shift
+    # Draw a sample from this normal distribution
+    y_pred_cl[i] = np.random.normal(loc=mu_i, scale=sigma_i)
+    # Save the cluster that produced this sample
+    cluster[i] = cluster_i
+
+# Generate plot with the corrected posterior predictive
+fig, ax = plt.subplots(figsize=[12,12])
+ax.set_title('Posterior Predictive with Clusters')
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_xlim(0.0, 1.0)
+ax.set_ylim(0.0, 1.0)
+ax.grid()
+# Plot the three clusters in different colors
+markersize=3
+ax.plot(x[cluster==0], y_pred_cl[cluster==0], color='r', linewidth=0, marker='o', markersize=markersize)
+ax.plot(x[cluster==1], y_pred_cl[cluster==1], color='b', linewidth=0, marker='o', markersize=markersize)
+ax.plot(x[cluster==2], y_pred_cl[cluster==2], color='g', linewidth=0, marker='o', markersize=markersize)
+# Plot the original data too
+ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=markersize,alpha=0.5)
