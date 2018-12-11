@@ -3,14 +3,25 @@ Michael S. Emanuel
 Sun Dec  9 23:25:22 2018
 """
 
-import pandas as pd
+# core
 import numpy as np
+import pandas as pd
+# pymc3 and theano
 import pymc3 as pm
 from pymc3.variational.callbacks import CheckParametersConvergence
 import theano.tensor as tt
 from theano.tensor.nnet import softmax
+# torch
+import torch
+import torch.nn as nn
+from torch.autograd import Variable 
+# plotting
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+# ipython
+from IPython.core.display import display
+from IPython import get_ipython
+# miscellaneous
 from am207_utils import load_vartbl, save_vartbl
 from typing import Dict
 
@@ -44,6 +55,11 @@ from typing import Dict
 fname: str = 'mixture.pickle'
 vartbl: Dict = load_vartbl(fname)
 
+# Set plotting mode to inline
+# https://code.i-harness.com/en/q/1bff0ed
+# get_ipython().run_line_magic('matplotlib', 'inline')
+# get_ipython().run_line_magic('matplotlib', 'qt')
+
 # Set plot style
 mpl.rcParams.update({'font.size': 20})
 
@@ -63,6 +79,7 @@ ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.plot(x, y, color='b', linewidth=0, marker='o', markersize=4)
 ax.grid()
+plt.close(fig)
 
 # *************************************************************************************************
 # A1 Write a pymc3 model for this problem. 
@@ -190,6 +207,48 @@ except:
 # Also produce a diagram like the one above to show the means with standard deviations 
 # showing their uncertainty overlaid on the data.
 
+def plot_gaussians(xx, mu, sigma, x, y, title):
+    """Generate a plot with the envelope around each of the three gaussians in the mixture"""
+    # Compute mu_lo and mu_hi for the envelopes
+    mu_lo = mu - 2.0 * sigma
+    mu_hi = mu + 2.0 * sigma
+
+    fig, ax = plt.subplots(figsize=[12,12])
+    ax.set_title(title)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid()
+    
+    # Plot the data in black
+    ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=3, alpha=0.5)
+    # Plot the three lines; match colors to problem
+    ax.plot(xx, mu[:,0], color='r')
+    ax.plot(xx, mu[:,1], color='b')
+    ax.plot(xx, mu[:,2], color='g')
+    # Fill in the color between the lower and upper bounds of each line
+    ax.fill_between(xx, mu_lo[:,0], mu_hi[:,0], color='r', alpha=0.05)
+    ax.fill_between(xx, mu_lo[:,1], mu_hi[:,1], color='b', alpha=0.05)
+    ax.fill_between(xx, mu_lo[:,2], mu_hi[:,2], color='g', alpha=0.05)
+    return fig
+
+
+def plot_weights(xx, weight, title):
+    """Generate plot with the weights on the three gaussians"""
+    fig, ax = plt.subplots(figsize=[12,12])
+    ax.set_title(title)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid()
+    # Plot the weights
+    ax.plot(xx, weight[:,0], color='r')
+    ax.plot(xx, weight[:,1], color='b')
+    ax.plot(xx, weight[:,2], color='g')
+    return fig
+
 # Posterior means for the six parameters
 post_means = dict()
 post_means['alpha'] = np.mean(trace['alpha'], axis=0)
@@ -200,52 +259,26 @@ post_means['weight_alpha'] = np.mean(trace['weight_alpha'], axis=0)
 post_means['weight_beta'] = np.mean(trace['weight_beta'], axis=0)
 
 # Generate evenly sorted arrays for plotting
-xx = np.linspace(0.0, 1.0, 200)
+plot_size: int = 200
+xx = np.linspace(0.0, 1.0, plot_size)
 
 # Compute mu and sigma for the three regressions
 mu = np.outer(xx, post_means['beta']) + post_means['alpha']
 log_sigma = np.outer(xx, post_means['log_sigma_beta']) + post_means['log_sigma_alpha']
 sigma = np.exp(log_sigma) + sigma_shift
-mu_lo = mu - 2.0 * sigma
-mu_hi = mu + 2.0 * sigma
 
 # Generate plot similar to one in the problem
-fig, ax = plt.subplots(figsize=[12,12])
-ax.set_title('Mixture Model: 3 Gaussians')
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.set_xlim(0.0, 1.0)
-ax.set_ylim(0.0, 1.0)
-ax.grid()
-
-# Plot the data in black
-ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=3, alpha=0.5)
-# Plot the three lines; match colors to problem
-ax.plot(xx, mu[:,0], color='r')
-ax.plot(xx, mu[:,1], color='b')
-ax.plot(xx, mu[:,2], color='g')
-# Fill in the color between the lower and upper bounds of each line
-ax.fill_between(xx, mu_lo[:,0], mu_hi[:,0], color='r', alpha=0.05)
-ax.fill_between(xx, mu_lo[:,1], mu_hi[:,1], color='b', alpha=0.05)
-ax.fill_between(xx, mu_lo[:,2], mu_hi[:,2], color='g', alpha=0.05)
+fig = plot_gaussians(xx, mu, sigma, x, y, 'Mixture Model: 3 Gaussians')
+display(fig)
+plt.close(fig)
 
 # Compute the weights on each model
 weight_z = np.outer(xx, post_means['weight_beta']) + post_means['weight_alpha']
 # Apply the softmax function to the regression sum to get the predicted weights
 weight = softmax(weight_z).eval()
-
-# Generate plot with the weights
-fig, ax = plt.subplots(figsize=[12,12])
-ax.set_title('Mixture Model: Weights')
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.set_xlim(0.0, 1.0)
-ax.set_ylim(0.0, 1.0)
-ax.grid()
 # Plot the weights
-ax.plot(xx, weight[:,0], color='r')
-ax.plot(xx, weight[:,1], color='b')
-ax.plot(xx, weight[:,2], color='g')
+fig = plot_weights(xx, weight, 'Mixture Model: Weights')
+plt.close(fig)
 
 # *************************************************************************************************
 # A4 Plot the posterior predictive (mean and variance) as a function of x) for this model 
@@ -268,23 +301,28 @@ y_pred = pred['y_obs']
 y_mean = np.mean(y_pred, axis=0)
 y_std = np.std(y_pred, axis=0)
 
-# Plot posterior mean and std
-fig, ax = plt.subplots(figsize=[12,12])
-ax.set_title('Mixture Model: Posterior Means +/- 1 SD')
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.set_xlim(0.0, 1.0)
-ax.set_ylim(0.0, 1.0)
-ax.grid()
-
-# Plot posterior mean of y, Shifted +/- 1 SD
-ax.plot(x, y_mean, color='k', linewidth=0, marker='o', label='mean')
-ax.plot(x, y_mean-y_std, color='b', linewidth=0, marker='o', label='mean-std')
-ax.plot(x, y_mean+y_std, color='r', linewidth=0, marker='o', label='mean+std')
-# The standard deviation
-ax.plot(x, y_std, color='magenta', linewidth=0, marker='o', label='std', markersize=3, alpha=0.2)
-ax.legend()
-
+def plot_post_mean_std(x, y_mean, y_std, title):
+    """Plot posterior mean and std for a set of samples"""
+    fig, ax = plt.subplots(figsize=[12,12])
+    ax.set_title(title)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid()
+    
+    # Plot posterior mean of y, Shifted +/- 1 SD
+    ax.plot(x, y_mean, color='k', linewidth=0, marker='o', label='mean')
+    ax.plot(x, y_mean-y_std, color='b', linewidth=0, marker='o', label='mean-std')
+    ax.plot(x, y_mean+y_std, color='r', linewidth=0, marker='o', label='mean+std')
+    # The standard deviation
+    ax.plot(x, y_std, color='magenta', linewidth=0, marker='o', label='std', markersize=3, alpha=0.2)
+    ax.legend()
+    return fig
+  
+# Plot the posterior means and stds
+fig = plot_post_mean_std(x, y_mean, y_std, 'Mixture Model: Posterior Means +/- 1 SD')
+plt.close(fig)
 
 # *************************************************************************************************
 # A5 Make a "correct" posterior predictive diagram by taking into account which "cluster" 
@@ -322,18 +360,235 @@ for i in range(N):
     # Save the cluster that produced this sample
     cluster[i] = cluster_i
 
-# Generate plot with the corrected posterior predictive
-fig, ax = plt.subplots(figsize=[12,12])
-ax.set_title('Posterior Predictive with Clusters')
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.set_xlim(0.0, 1.0)
-ax.set_ylim(0.0, 1.0)
+def plot_post_cluster(x, y_pred, cluster, title):
+    """Generate plot with the corrected posterior predictive"""
+    fig, ax = plt.subplots(figsize=[12,12])
+    ax.set_title(title)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid()
+    # Plot the three clusters in different colors
+    markersize=3
+    ax.plot(x[cluster==0], y_pred[cluster==0], color='r', linewidth=0, marker='o', markersize=markersize)
+    ax.plot(x[cluster==1], y_pred[cluster==1], color='b', linewidth=0, marker='o', markersize=markersize)
+    ax.plot(x[cluster==2], y_pred[cluster==2], color='g', linewidth=0, marker='o', markersize=markersize)
+    # Plot the original data too
+    ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=markersize,alpha=0.5)
+    return fig
+
+# Plot the corrected posterior predictor based on sampled clusters
+fig = plot_post_cluster(x, y_pred_cl, cluster, 'Posterior Predictive with Clusters')
+display(fig)
+plt.close(fig)
+
+# *************************************************************************************************
+# Part B. Mixture Density Network
+# A mixture density network (see the enclosed Chapter 5 excerpt from Bishop or 
+# https://publications.aston.ac.uk/373/1/NCRG_94_004.pdf) is very closely related to the mixture of experts model. 
+# The difference is that we fit the regressions using a neural network where hidden layers 
+# are shared amongst the mean, sigma, and mixing probability regressions. 
+# (We could have fit 3 separate neural networks in Part A but opted to fit linear regressions for simplicity)
+# (More explanation here. You are welcome to take code from here with attribution.)
+# *************************************************************************************************
+
+# You job here is to construct a multi-layer perceptron model with 
+# a linear hidden layer with 20 units followed by a Tanh activation. 
+# After the activation layer, 3 separate linear layers with 
+# n_hidden inputs and n_gaussian=3 outputs will complete the network. 
+# The probabilities part of the network is then passed through a softmax. 
+# The means part is left as is. 
+# The sigma part is exponentiated and 0.01 added, as in part A
+
+# Thus the structure looks like:
+# input:1 --linear-> n_hidden -> Tanh --linear-->n_gaussians      ...mu
+#                            --linear-->n_gaussians->softmax     ...lambda
+#                            --linear-->n_gaussians->exp + 0.01  ...sigma
+# We then need to use a loss function for the last layer of the network.
+
+# Using the mean-squared-error loss is not appropriate as the expected value of samples drawn from 
+# the sampling distribution of the network will not reflect the 3-gaussian structure 
+# (this is the essence of the difference between A4 and A5 above). 
+# Thus we'll use the negative loss likelihood of the gaussian mixture model explicitly.
+
+# *************************************************************************************************
+# B1: Write the network as a class MixtureDensityNetwork which inherits from pytorch nn.Module. 
+# Implement a constructor which allows at-least the number of hidden layers to be varied. 
+# Also implement the forward method.
+
+class MixtureDensityNetwork(nn.Module):
+    """Implement a mixture density network as a torch.nn Module subclass."""
+    # Citation: the following example was consulted in developing this class
+    # No code was copy / pasted into what is presented here
+    # (a reference implementation was temporarily copied for testing purposes)
+    # https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
+    def __init__(self, n_hidden: int, n_gaussian: int):
+        # Initialize the parent instance of nn.Module
+        super(MixtureDensityNetwork, self).__init__()
+        
+        # The first layer is linear -> n_hidden followed by a tanh activation
+        # z should be viewed as the hidden activations
+        self.z = nn.Sequential(nn.Linear(1, n_hidden), nn.Tanh())
+        
+        # A linear layer to predict mu from z_h
+        self.mu = nn.Linear(n_hidden, n_gaussian)
+        
+        # A linear layer followed by exp with an offset to predict sigma
+        self.log_sigma = nn.Linear(n_hidden, n_gaussian)
+        
+        # A linear layer followed by a softmax to predict the mixture weights
+        self.weight_z = nn.Linear(n_hidden, n_gaussian)
+    
+    def forward(self, x):
+        """Forward mode for this network"""
+        # Compute the hidden activations z_h
+        z = self.z(x)
+        # Compute the mean mu and standard deviation sigma
+        mu = self.mu(z)
+        sigma = torch.exp(self.log_sigma(z)) + sigma_shift
+        # Compute the weights
+        weight = nn.functional.softmax(self.weight_z(z), dim=-1)
+        # Return a tuple with weight, sigma, and mu
+        return weight, sigma, mu
+    
+    def set_x(self, x: np.ndarray):
+        """Bind x to the network; passed as a numpy array and converted to an autograd Variable"""
+        # Length of data, N
+        N: int = len(x)
+        # Create torch tensor from x
+        x_tensor = torch.from_numpy(np.float32(x).reshape((N,1)))
+        # Create torch autograd variable from x_tensor and bind it to the network
+        self.x = Variable(x_tensor)
+    
+    def set_y(self, y: np.ndarray):
+        """Bind x to the network; passed as a numpy array and converted to an autograd Variable"""
+        # Length of data, N
+        N: int = len(y)
+        # Create torch tensor from x
+        y_tensor = torch.from_numpy(np.float32(y).reshape((N,1)))
+        # Create torch autograd variable from y_tensor and bind it to the network
+        self.y = Variable(y_tensor)
+    
+    def bind_data(self, x: np.ndarray, y: np.ndarray):
+        """Bind the x and y data to the network as autograd variables."""
+        # Dispatch calls to set_x and set_y
+        self.set_x(x)
+        self.set_y(y)
+    
+    def gaussian(self, mu, sigma, y_variable):
+        """
+        Evaluate the probability density of y on the gaussian distribution
+        Used to compute the likelihood and the loss function
+        """
+        # Normalization factor for the gaussian distribution
+        norm = 1.0 / np.sqrt(2.0*np.pi)
+        # Compute inverse of sigma
+        sigma_inv = torch.reciprocal(sigma)
+        # The error in standardized z units is (y - mu) / sigma
+        # Difference between predicted y and mu has shape (N,num_gaussian)
+        # call to y.expand_as(mu) is like numpy broadcasting, expands from (N,) to (N,num_gauassian)
+        z = sigma_inv * (y_variable.expand_as(mu) - mu)
+        # The probability density is f(z) = norm / sigma * exp(-1/2 z^2)
+        return (sigma_inv * torch.exp(-0.5 * z * z)) * norm
+    
+    def loss_func(self, weight, mu, sigma):
+        """Compute the loss function with these weights and parameter values."""
+        # Compute the likelihood of the predictions
+        like = self.gaussian(mu, sigma, self.y) * weight
+        # Add this up over all num_gaussian classes
+        like = torch.sum(like, dim=1)
+        # The loss on each sample is the negative log likelihood
+        loss = -torch.log(like)
+        # Return the mean loss across the full data set (all N samples)
+        return torch.mean(loss)        
+    
+    def train(self, num_epochs: int):
+        """Train this network with an Adam optimizer"""
+        # Initialize array of training losses
+        self.loss_history = np.zeros(num_epochs)
+        # Use Adam optimizer
+        self.optimizer = torch.optim.Adam(self.parameters())   
+        # Train over num_epochs epochs
+        for epoch in range(num_epochs):
+            # Evaluate the network on the full set of x data
+            # weight_variable, sigma_variable, mu_variable = network(x_variable)
+            weight_variable, sigma_variable, mu_variable = self(self.x)
+            # Compute the loss function; this is differentiable thanks to autograd
+            loss = self.loss_func(weight_variable,  mu_variable, sigma_variable)
+            # Take one step with the optimizer to minimize the loss
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            # Save the loss
+            loss_current = loss.item()
+            self.loss_history[epoch] = loss_current
+            # Status update
+            if epoch % 500 == 0:
+                print(f'Epoch {epoch:5d}; loss {loss_current:0.3f}')
+
+# *************************************************************************************************
+# B2: Train the network using the Adam or similiar optimizer and gradient descent/SGD.
+#  Make sure your loss converges and plot this convergence.
+
+# Number of epochs to train the network
+num_epochs: int = 10000
+# File name for saving the trained network
+network_fname = 'mixture_network.pt'
+
+# Load the trained network if available; otherwise train it.
+try:
+    network = torch.load(network_fname)
+    print(f'Loaded trained gaussian mixture network.')
+except:    
+    # Instantiate a mixture density network with 20 hidden units and 3 gaussians
+    network = MixtureDensityNetwork(n_hidden=20, n_gaussian=3)
+    # Bind x and y data to the network
+    network.bind_data(x, y)
+    # Train the network
+    network.train(num_epochs)
+    # Save the model
+    torch.save(network, network_fname)
+
+# Plot the loss history for the mixture density network training
+fig, ax = plt.subplots(figsize=[12,8])
+ax.set_title('Learning Curve for Mixture Density Network')
+ax.set_xlabel('Epoch')
+ax.set_ylabel('Loss')
+ax.plot(np.arange(num_epochs), network.loss_history, color='b')
 ax.grid()
-# Plot the three clusters in different colors
-markersize=3
-ax.plot(x[cluster==0], y_pred_cl[cluster==0], color='r', linewidth=0, marker='o', markersize=markersize)
-ax.plot(x[cluster==1], y_pred_cl[cluster==1], color='b', linewidth=0, marker='o', markersize=markersize)
-ax.plot(x[cluster==2], y_pred_cl[cluster==2], color='g', linewidth=0, marker='o', markersize=markersize)
-# Plot the original data too
-ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=markersize,alpha=0.5)
+plt.close(fig)
+
+# *************************************************************************************************
+# B3: Plot the MLE parameters against x. 
+# Make a plot similar to A3 above where you overlay the "means" of the gaussians against the data. 
+# Plot traces of the mu/sigma/lambda as an aid in debugging.
+
+# Build a tensor with the plotting points x
+xx_tensor = torch.from_numpy(np.float32(xx).reshape((plot_size,1)))
+# Extract tensors for weight, sigma, and mu by running the network on these points (not the training data!)
+weight_tensor, sigma_tensor, mu_tensor = network.forward(xx_tensor)
+# Convert these to "plain old data" in numpy arrays for plotting
+weight = weight_tensor.data.numpy()
+sigma = sigma_tensor.data.numpy()
+mu = mu_tensor.data.numpy()
+
+idx = np.argsort(mu[100])
+weight = weight[:, idx]
+sigma = sigma[:, idx]
+mu = mu[:, idx]
+
+# Plot the three gaussians in the mixture network model
+fig = plot_gaussians(xx, mu, sigma, x, y, 'Mixture Density Network: 3 Gaussians')
+display(fig)
+plt.close(fig)
+
+# Plot the weights
+fig = plot_weights(xx, weight, 'Mixture Density Network Weights')
+display(fig)
+plt.close(fig)
+
+
+# *************************************************************************************************
+# B4: Sample from the sampling distributions at the estimated point values of 
+# μ and σ (given cluster) to make a plot similar to A5 above
