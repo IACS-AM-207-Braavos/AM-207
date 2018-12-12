@@ -20,7 +20,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 # ipython
 from IPython.core.display import display
-from IPython import get_ipython
+# from IPython import get_ipython
 # miscellaneous
 from am207_utils import load_vartbl, save_vartbl
 from typing import Dict
@@ -105,17 +105,19 @@ with pm.Model() as model:
     xt = tt.reshape(x, (N,1))
 
     # The parameters for the three regression lines; mean(x) = alpha + x*beta; shape (K)
-    alpha = pm.Normal(name='alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
-    beta = pm.Normal(name='beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    alpha = pm.Normal(name='alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=(K,))
+    beta = pm.Normal(name='beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=(K,))
+
     # Reshape into row vectors
     alpha_row = tt.reshape(alpha, (1,K))
     beta_row = tt.reshape(beta, (1,K))
+    
     # The mean of the regression line, mu, is a deterministic function of x = alpha + x * beta; shape (N,K)
-    mu = tt.add(alpha_row, tt.dot(xt, beta_row))
+    mu = pm.Deterministic('mu', tt.add(alpha_row, tt.dot(xt, beta_row)))
     
     # The parameters for the regression line of log-sigma for each gaussian
-    log_sigma_alpha = pm.Normal(name='log_sigma_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
-    log_sigma_beta = pm.Normal(name='log_sigma_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    log_sigma_alpha = pm.Normal(name='log_sigma_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=(K,))
+    log_sigma_beta = pm.Normal(name='log_sigma_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=(K,))
     # Reshape into row vectors
     log_sigma_alpha_row = tt.reshape(log_sigma_alpha, (1,K))
     log_sigma_beta_row = tt.reshape(log_sigma_beta, (1,K))
@@ -123,17 +125,17 @@ with pm.Model() as model:
     log_sigma = tt.add(log_sigma_alpha_row, tt.dot(xt, log_sigma_beta_row))
     
     # Sigma for each gaussian is deterministic; include shift of 0.01; shape (N,K)    
-    sigma = tt.exp(log_sigma) + sigma_shift
+    sigma = pm.Deterministic('sigma', tt.exp(log_sigma) + sigma_shift)
     
     # Weighting factors weight_i are modeled as linear regressions also
-    weight_alpha = pm.Normal(name='weight_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
-    weight_beta = pm.Normal(name='weight_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=K)
+    weight_alpha = pm.Normal(name='weight_alpha', mu=normal_prior_mu, sd=normal_prior_sd, shape=(K,))
+    weight_beta = pm.Normal(name='weight_beta', mu=normal_prior_mu, sd=normal_prior_sd, shape=(K,))
     # Reshape into row vectors
     weight_alpha_row = tt.reshape(weight_alpha, (1,K))
     weight_beta_row = tt.reshape(weight_beta, (1,K))
     
     # The weighting factors are a softmax of weight_alpha + x*weight_beta; shape (N,K)
-    weight = softmax(weight_alpha_row + tt.dot(xt, weight_beta_row))
+    weight = pm.Deterministic('weight', softmax(weight_alpha_row + tt.dot(xt, weight_beta_row)))
     
     # Sample points using a pymc3 NormalMixture
     # See lecture notes 25, p. 44
@@ -152,9 +154,9 @@ num_iters: int = 50000
 # Fit the model using ADVI
 try:
     advi = vartbl['advi']
-    print(f'Loaded ADVI fit for Guassian Mixture Model.')
+    print(f'Loaded ADVI fit for Gaussian Mixture Model.')
 except:
-    print(f'Running ADVI fit for Guassian Mixture Model...')
+    print(f'Running ADVI fit for Gaussian Mixture Model...')
     advi = pm.ADVI(model=model)
     advi.fit(n=num_iters, obj_optimizer=pm.adam(), 
              callbacks=[CheckParametersConvergence()])
@@ -173,19 +175,26 @@ except:
 #        vartbl['advi_fr'] = advi_fr
 #        save_vartbl(vartbl, fname)
 
+def plot_elbo(elbo, plot_step, title):
+    """Generate the ELBO plot"""
+    fig, ax = plt.subplots(figsize=[12,8])
+    ax.set_title(title)
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('ELBO')
+    plot_x = np.arange(0,num_iters,plot_step)
+    plot_y = elbo[::plot_step]
+    ax.plot(plot_x, plot_y, color='b')
+    ax.grid()
+    return fig
+
 # Plot the ELBO
-elbo = -advi.hist
-fig, ax = plt.subplots(figsize=[12,8])
-ax.set_title('ELBO for ADVI Fit of Gaussian Mixture Model')
-ax.set_xlabel('Iteration')
-ax.set_ylabel('ELBO')
-ax.plot(elbo[::10], color='b')
-ax.grid()
+fig = plot_elbo(-advi.hist, 10, 'ELBO for ADVI Fit of Gaussian Mixture Model')
 plt.close(fig)
+
 
 # *************************************************************************************************
 # Number of samples to draw
-num_samples: int = 10000
+num_samples: int = 2000
 
 # Draw parameter samples (trace)
 # See lecture 24, p. 33 for example
@@ -207,12 +216,30 @@ except:
 # Also produce a diagram like the one above to show the means with standard deviations 
 # showing their uncertainty overlaid on the data.
 
+def standardize_gaussians(mu, sigma, weight):
+    """Standardize the identities of the three gaussians"""
+    # Get index to sort the three series for consistency
+    mu_med = np.median(mu, axis=0)
+    idx = np.argsort(mu_med, axis=0)[::-1]
+    
+    # Permute columns of all three arrays
+    mu = mu.copy()[:, idx]
+    sigma = sigma.copy()[:, idx]
+    weight = weight.copy()[:, idx]
+    
+    return (mu, sigma, weight, idx)
+
+
 def plot_gaussians(xx, mu, sigma, x, y, title):
     """Generate a plot with the envelope around each of the three gaussians in the mixture"""
+    # Standardize identities of mu and sigma
+    
+
     # Compute mu_lo and mu_hi for the envelopes
     mu_lo = mu - 2.0 * sigma
     mu_hi = mu + 2.0 * sigma
 
+    # Frame for the plot
     fig, ax = plt.subplots(figsize=[12,12])
     ax.set_title(title)
     ax.set_xlabel('x')
@@ -258,26 +285,36 @@ post_means['log_sigma_beta'] = np.mean(trace['log_sigma_beta'], axis=0)
 post_means['weight_alpha'] = np.mean(trace['weight_alpha'], axis=0)
 post_means['weight_beta'] = np.mean(trace['weight_beta'], axis=0)
 
-# Generate evenly sorted arrays for plotting
-plot_size: int = 200
-xx = np.linspace(0.0, 1.0, plot_size)
+#    # Generate evenly sorted arrays for plotting
+#    plot_size: int = 200
+#    xx = np.linspace(0.0, 1.0, plot_size)
 
-# Compute mu and sigma for the three regressions
-mu = np.outer(xx, post_means['beta']) + post_means['alpha']
-log_sigma = np.outer(xx, post_means['log_sigma_beta']) + post_means['log_sigma_alpha']
-sigma = np.exp(log_sigma) + sigma_shift
+#    # Compute mu and sigma for the three regressions by recreating the calculations
+#    # Only use the stochastic variables.
+#    mu = np.outer(xx, post_means['beta']) + post_means['alpha']
+#    log_sigma = np.outer(xx, post_means['log_sigma_beta']) + post_means['log_sigma_alpha']
+#    sigma = np.exp(log_sigma) + sigma_shift
+#    
+#    # Compute the weights on each model
+#    weight_z = np.outer(xx, post_means['weight_beta']) + post_means['weight_alpha']
+#    # Apply the softmax function to the regression sum to get the predicted weights
+#    weight = softmax(weight_z).eval()
+
+# Compute posterior means from the trace, which includes the intermediate results for mu, sigma, and weight
+mu = np.mean(trace['mu'], axis=0)
+sigma = np.mean(trace['sigma'], axis=0)
+weight = np.mean(trace['weight'], axis=0)
+
+# Standardize the identities of the three Guassians for consistent colors
+mu, sigma, weight, idx = standardize_gaussians(mu, sigma, weight)
 
 # Generate plot similar to one in the problem
-fig = plot_gaussians(xx, mu, sigma, x, y, 'Mixture Model: 3 Gaussians')
+fig = plot_gaussians(x, mu, sigma, x, y, 'Mixture Model: 3 Gaussians')
 display(fig)
 plt.close(fig)
 
-# Compute the weights on each model
-weight_z = np.outer(xx, post_means['weight_beta']) + post_means['weight_alpha']
-# Apply the softmax function to the regression sum to get the predicted weights
-weight = softmax(weight_z).eval()
 # Plot the weights
-fig = plot_weights(xx, weight, 'Mixture Model: Weights')
+fig = plot_weights(x, weight, 'Mixture Model: Weights')
 plt.close(fig)
 
 # *************************************************************************************************
@@ -324,6 +361,25 @@ def plot_post_mean_std(x, y_mean, y_std, title):
 fig = plot_post_mean_std(x, y_mean, y_std, 'Mixture Model: Posterior Means +/- 1 SD')
 plt.close(fig)
 
+def plot_post_all(x, y_pred, title):
+    """Plot all the posterior points in one big cloud"""
+    fig, ax = plt.subplots(figsize=[12,12])
+    ax.set_title(title)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid()
+    
+    # Plot all the posterior points
+    num_samples = y_pred.shape[0]
+    x_plot = np.tile(x, (num_samples, 1))
+    ax.plot(x_plot, y_pred, color='k', linewidth=0, marker='o', markersize=1, alpha=0.2)
+    return fig
+
+# Plot the full cloud of posterior points to show how the posterior mean fails
+plot_post_all(x, y_pred[0:200, :], 'All Posterior Points')
+
 # *************************************************************************************************
 # A5 Make a "correct" posterior predictive diagram by taking into account which "cluster" 
 # or "regression line" the data is coming from. 
@@ -337,30 +393,7 @@ plt.close(fig)
 # the entire trace of  μ  and  σ  and  λ . 
 # The former diagram may look something like this:
 
-# Compute the weights on each model
-# This looks similar to the chart above, but that one used the array 'xx' of 200 evenly sampled x points
-# This one uses array 'x' of the actual data; 1000 points, not sorted
-weight_z = np.outer(x, post_means['weight_beta']) + post_means['weight_alpha']
-weight = softmax(weight_z).eval()
-
-# Initialize arrays for the clusters and predictions
-cluster = np.zeros(N, dtype=np.int8)
-y_pred_cl = np.zeros(N)
-# Sample N posterior predictive points
-for i in range(N):
-    # Sample the cluster based on the probabilities above
-    cluster_i = np.random.choice(a=3, p=weight[i])
-    # The mean of the distribution is a combination of the sampled alpha and beta
-    mu_i = trace['alpha'][i, cluster_i] + trace['beta'][i, cluster_i] * x[i]
-    # The standard deviation of the distribution is based on the log_sigma calculation
-    log_sigma_i = trace['log_sigma_alpha'][i, cluster_i] + trace['log_sigma_beta'][i, cluster_i] * x[i]
-    sigma_i = np.exp(log_sigma_i) + sigma_shift
-    # Draw a sample from this normal distribution
-    y_pred_cl[i] = np.random.normal(loc=mu_i, scale=sigma_i)
-    # Save the cluster that produced this sample
-    cluster[i] = cluster_i
-
-def plot_post_cluster(x, y_pred, cluster, title):
+def plot_post_cluster(x_pred, y_pred, cluster, x, y, title):
     """Generate plot with the corrected posterior predictive"""
     fig, ax = plt.subplots(figsize=[12,12])
     ax.set_title(title)
@@ -371,15 +404,64 @@ def plot_post_cluster(x, y_pred, cluster, title):
     ax.grid()
     # Plot the three clusters in different colors
     markersize=3
-    ax.plot(x[cluster==0], y_pred[cluster==0], color='r', linewidth=0, marker='o', markersize=markersize)
-    ax.plot(x[cluster==1], y_pred[cluster==1], color='b', linewidth=0, marker='o', markersize=markersize)
-    ax.plot(x[cluster==2], y_pred[cluster==2], color='g', linewidth=0, marker='o', markersize=markersize)
+    ax.plot(x_pred[cluster==0], y_pred[cluster==0], color='r', linewidth=0, marker='o', markersize=markersize)
+    ax.plot(x_pred[cluster==1], y_pred[cluster==1], color='b', linewidth=0, marker='o', markersize=markersize)
+    ax.plot(x_pred[cluster==2], y_pred[cluster==2], color='g', linewidth=0, marker='o', markersize=markersize)
     # Plot the original data too
-    ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=markersize,alpha=0.5)
+    ax.plot(x, y, color='k', linewidth=0, marker='o', markersize=markersize, alpha=0.5)
     return fig
 
+# Compute the weights on each model
+# This looks similar to the chart above, but that one used the array 'xx' of 200 evenly sampled x points
+# This one uses array 'x' of the actual data; 1000 points, not sorted
+#    weight_z = np.outer(x, post_means['weight_beta']) + post_means['weight_alpha']
+#    weight = softmax(weight_z).eval()
+#    
+#    # Initialize arrays for the clusters and predictions
+#    cluster = np.zeros(N, dtype=np.int8)
+#    y_pred_cl = np.zeros(N)
+#    # Sample N posterior predictive points
+#    for i in range(N):
+#        # Sample the cluster based on the probabilities above
+#        cluster_i = np.random.choice(a=3, p=weight[i])
+#        # The mean of the distribution is a combination of the sampled alpha and beta
+#        mu_i = trace['alpha'][i, cluster_i] + trace['beta'][i, cluster_i] * x[i]
+#        # The standard deviation of the distribution is based on the log_sigma calculation
+#        log_sigma_i = trace['log_sigma_alpha'][i, cluster_i] + trace['log_sigma_beta'][i, cluster_i] * x[i]
+#        sigma_i = np.exp(log_sigma_i) + sigma_shift
+#        # Draw a sample from this normal distribution
+#        y_pred_cl[i] = np.random.normal(loc=mu_i, scale=sigma_i)
+#        # Save the cluster that produced this sample
+#        cluster[i] = cluster_i
+
+# Extract the parameters mu, sigma, and weight from the posterior samples
+# These all have shape (num_samples, N, 3)
+# Use idx to standardize the identities of the clusters!
+mu = trace['mu'][:,:,idx]
+sigma = trace['sigma'][:,:,idx]
+weight = trace['weight'][:,:,idx]
+
+# Perform a simple "ancestral sampling" style strategy
+# (I don't see the need for a fancy Gumbel sampling approach here!)
+cluster = np.zeros(num_samples, dtype=np.int8)
+x_pred_cl = np.zeros(num_samples)
+y_pred_cl = np.zeros(num_samples)
+for i in range(num_samples):
+    # Draw a random row of the sample data
+    row_num = np.random.choice(num_samples)
+    # Cycle throught the x's in order
+    col_num = i % N
+    # Sample the cluster assignments according to the weights here
+    cluster_i = np.random.choice(a=K, p=weight[row_num, col_num])
+    # Draw a sample from this normal
+    x_pred_cl[i] = x[col_num]
+    y_pred_cl[i] = np.random.normal(loc = mu[row_num, col_num, cluster_i], 
+                                  scale = sigma[row_num, col_num, cluster_i])
+    # Save the cluster assignment
+    cluster[i] = cluster_i
+
 # Plot the corrected posterior predictor based on sampled clusters
-fig = plot_post_cluster(x, y_pred_cl, cluster, 'Posterior Predictive with Clusters')
+fig = plot_post_cluster(x_pred_cl, y_pred_cl, cluster, x, y, 'Posterior Predictive with Clusters')
 display(fig)
 plt.close(fig)
 
@@ -564,31 +646,233 @@ plt.close(fig)
 # Make a plot similar to A3 above where you overlay the "means" of the gaussians against the data. 
 # Plot traces of the mu/sigma/lambda as an aid in debugging.
 
-# Build a tensor with the plotting points x
-xx_tensor = torch.from_numpy(np.float32(xx).reshape((plot_size,1)))
-# Extract tensors for weight, sigma, and mu by running the network on these points (not the training data!)
-weight_tensor, sigma_tensor, mu_tensor = network.forward(xx_tensor)
-# Convert these to "plain old data" in numpy arrays for plotting
-weight = weight_tensor.data.numpy()
-sigma = sigma_tensor.data.numpy()
-mu = mu_tensor.data.numpy()
-
-idx = np.argsort(mu[100])
-weight = weight[:, idx]
-sigma = sigma[:, idx]
-mu = mu[:, idx]
+def network_params(network, x: np.ndarray):
+    """Run the network on new x values; return weight, mu and sigma for these parameters"""
+    # Build a tensor with this data x
+    N: int = len(x)
+    x_tensor = torch.from_numpy(np.float32(x).reshape((N,1)))
+    # Extract tensors for weight, sigma, and mu by running the network on these points (not the training data!)
+    weight_tensor, sigma_tensor, mu_tensor = network.forward(x_tensor)
+    # Convert these to "plain old data" in numpy arrays for plotting
+    weight = weight_tensor.data.numpy()
+    sigma = sigma_tensor.data.numpy()
+    mu = mu_tensor.data.numpy()
+    # Sort these so order is constent with previous treatment and red, blue, and green line up    
+    idx = np.argsort(np.median(mu, axis=0))[::-1]
+    weight = weight[:, idx]
+    sigma = sigma[:, idx]
+    mu = mu[:, idx]
+    # Return weight, sigma, mu for these x values
+    return weight, sigma, mu
 
 # Plot the three gaussians in the mixture network model
-fig = plot_gaussians(xx, mu, sigma, x, y, 'Mixture Density Network: 3 Gaussians')
+weight, sigma, mu = network_params(network, x)
+fig = plot_gaussians(x, mu, sigma, x, y, 'Mixture Density Network: 3 Gaussians')
 display(fig)
 plt.close(fig)
 
 # Plot the weights
-fig = plot_weights(xx, weight, 'Mixture Density Network Weights')
+fig = plot_weights(x, weight, 'Mixture Density Network Weights')
+display(fig)
+plt.close(fig)
+
+# *************************************************************************************************
+# B4: Sample from the sampling distributions at the estimated point values of 
+# μ and σ (given cluster) to make a plot similar to A5 above
+
+# Sample x with the same data as the original sample
+weight, sigma, mu = network_params(network, x)
+
+# Initialize arrays for the clusters and predictions
+cluster = np.zeros(N, dtype=np.int8)
+x_pred = x
+y_pred = np.zeros(N)
+# Sample N posterior predictive points
+for i in range(N):
+    # Sample the cluster based on the probabilities above
+    cluster_i = np.random.choice(a=3, p=weight[i])
+    # The mean and sigma are in row i and the cluster_i column
+    mu_i = mu[i, cluster_i]
+    sigma_i = sigma[i, cluster_i]
+    # Draw a sample from this normal distribution
+    y_pred[i] = np.random.normal(loc=mu_i, scale=sigma_i)
+    # Save the cluster that produced this sample
+    cluster[i] = cluster_i
+
+# Plot the corrected posterior predictor based on sampled clusters
+fig = plot_post_cluster(x_pred, y_pred, cluster, x, y, 'Posterior Predictive with Clusters')
 display(fig)
 plt.close(fig)
 
 
 # *************************************************************************************************
-# B4: Sample from the sampling distributions at the estimated point values of 
-# μ and σ (given cluster) to make a plot similar to A5 above
+# Part C Variational Mixture Density Network
+# We want to implement the Mixture Density Metwork model that we constructed in Part B 
+# directly in pymc3 and use variational inference to sample from it. 
+# We may need more iterations in order to get convergence as this model will likely not 
+# converge as fast as the pytorch equivalent.
+# *************************************************************************************************
+
+# current parameter estimates
+sd = network.state_dict()
+# hidden inputs from data input x
+z_weight = sd['z.0.weight'].numpy().squeeze()
+z_bias = sd['z.0.bias'].numpy().squeeze()
+# mean mu from hidden activation z
+mu_weight = sd['mu.weight'].numpy().squeeze()
+mu_bias = sd['mu.bias'].numpy().squeeze()
+# log_sigma from hidden activation z
+log_sigma_weight = sd['log_sigma.weight'].numpy().squeeze()
+log_sigma_bias = sd['log_sigma.bias'].numpy().squeeze()
+# weight_z from hidden activation z
+weight_z_weight = sd['weight_z.weight'].numpy().squeeze()
+weight_z_bias = sd['weight_z.bias'].numpy().squeeze()
+
+
+# *************************************************************************************************
+# C1: Write out the equivalent pymc3 version of the MDN and generate posterior samples with ADVI.
+with pm.Model() as model_mdn:
+    # The number of data points
+    N: int = len(x)
+    # The number of gaussians
+    K: int = 3
+    # The number of hidden units
+    num_hidden: int = 20
+    
+    # The priors for the weights and biases on the hidden layer
+    prior_weight_mu = 0.0
+    prior_weight_sd = 1.0
+    prior_bias_mu = 0.0
+    prior_bias_sd = 1.0
+    
+    # Reshape x to an Nx1 vector
+    xt = tt.reshape(x, (N,1))
+    
+    # Sample the weights and biases for the hidden units
+    z_weight = pm.Normal(name='z_weight', mu=prior_weight_mu, sd=prior_weight_sd, shape=num_hidden)
+    z_bias = pm.Normal(name='z_bias', mu=prior_bias_mu, sd=prior_bias_sd, shape=num_hidden)
+
+    # Reshape z_weight and z_bias into row vectors of shape (1, num_hidden)
+    z_weight_row = tt.reshape(z_weight, (1,num_hidden))
+    z_bias_row = tt.reshape(z_bias, (1,num_hidden))
+    
+    # Compute the inputs for the activation functions
+    z_input = tt.add(tt.dot(xt, z_weight_row), z_bias_row)
+    # Compute the hidden unit activations by applying tanh
+    z = tt.tanh(z_input)
+    
+    # Sample weights to compute mu from the hidden activations
+    mu_weight = pm.Normal(name='mu_weight', mu=prior_weight_mu, sd=prior_weight_sd, shape=(num_hidden,K))
+    mu_bias = pm.Normal(name='mu_bias', mu=prior_bias_mu, sd=prior_bias_sd, shape=(1,K))
+    
+    # Get the values of mu at the midpoint so we can make sure the three lines are in a standard order
+    # mu_mid = mu_weight * 0.5 + mu_bias
+    # idx = np.argsort(mu_mid, axis=0)[::-1]
+    
+    # Apply this sort to mu_weight and mu_bias
+    # mu_weight = mu_weight[idx]
+    # mu_bias = mu_bias[idx]
+
+    # Compute the regression mean mu from the hidden units
+    # mu = tt.add(tt.dot(z, mu_weight), mu_bias)
+    mu = pm.Deterministic('mu', tt.add(tt.dot(z, mu_weight), mu_bias))
+
+    # Sample weights to compute log_sigma from the hidden activations
+    log_sigma_weight = pm.Normal(name='log_sigma_weight', mu=prior_weight_mu, sd=prior_weight_sd, shape=(num_hidden,K))
+    log_sigma_bias = pm.Normal(name='log_sigma_bias', mu=prior_bias_mu, sd=prior_bias_sd, shape=(1,K))
+    
+    # Compute the sigma for each gaussian
+    log_sigma = tt.add(tt.dot(z, log_sigma_weight), log_sigma_bias)
+    # sigma = tt.exp(log_sigma) + sigma_shift
+    sigma = pm.Deterministic('sigma', tt.exp(log_sigma) + sigma_shift)
+    
+    # Sample weights to compute mixing weights from the hidden activations
+    weight_weight = pm.Normal(name='weight_weight', mu=prior_weight_mu, sd=prior_weight_sd, shape=(num_hidden,K))
+    weight_bias = pm.Normal(name='weight_bias', mu=prior_bias_mu, sd=prior_bias_sd, shape=(1,K))
+    
+    # Compute the mixing weights for each gaussian, before application of the softmax
+    weight_z = tt.add(tt.dot(z, weight_weight), weight_bias)
+
+    # Apply the softmax so the three weights add up to 1
+    # weight = softmax(weight_z)
+    weight = pm.Deterministic('weight', softmax(weight_z))
+    
+    # Sample points using a pymc3 NormalMixture
+    y_obs = pm.NormalMixture('y_obs', w=weight, mu=mu, sd=sigma, observed=y)
+
+# *************************************************************************************************
+# Fit this model
+# Number of iterations for ADVI fit of mixture density network
+num_iters_mdn: int = 500000
+
+# start_point = {'z_weight': z_weight}
+
+try:
+    advi_mdn = vartbl['advi_mdn']
+    print(f'Loaded ADVI fit for Mixture Density Model.')
+except:
+    print(f'Running ADVI fit for Mixture Density Model...')
+    advi_mdn = pm.ADVI(model=model_mdn)
+    advi_mdn.fit(n=num_iters_mdn, obj_optimizer=pm.adam(), 
+             callbacks=[CheckParametersConvergence()])
+    vartbl['advi_mdn'] = advi_mdn
+    save_vartbl(vartbl, fname)
+
+# Plot the ELBO
+elbo = -advi_mdn.hist
+fig, ax = plt.subplots(figsize=[12,8])
+ax.set_title('ELBO for ADVI Fit of Mixture Density Model')
+ax.set_xlabel('Iteration')
+ax.set_ylabel('ELBO')
+plot_step = 100
+plot_y = elbo[::plot_step]
+plot_x = np.arange(0,num_iters_mdn,plot_step)
+ax.plot(plot_x, plot_y, color='b')
+ax.grid()
+
+# *************************************************************************************************
+# C2: Sample from the posterior predictive and produce a diagram like B4 and A5 for this model. 
+# Plot traces of the mu/sigma/lambda as an aid in debugging your sampler.
+
+# Number of samples to draw for the mixture density network
+num_samples_mdn: int = 10000
+
+# Draw parameter samples (trace)
+try:
+    trace_mdn = vartbl['trace_mdn']
+    print(f'Loaded trace from ADVI fit of Mixture Density Model.')
+except:
+    print(f'Drawing posterior samples (parameters) from ADVI fit of Mixture Density Model...')
+    trace_mdn = advi_mdn.approx.sample(num_samples_mdn)
+    vartbl['trace_mdn'] = trace_mdn
+    save_vartbl(vartbl, fname)
+
+# Trace summary for the mixture density network
+summary_mdn = pm.summary(trace_mdn)
+
+# mu_post_mean = 
+
+# Draw posterior predictive
+# See lecture 24, p. 33 for example
+try:
+    pred_mdn = vartbl['pred_mdn']
+    print(f'Loaded posterior predictive from ADVI fit of Mixture Density Model.')
+except:
+    print(f'Drawing posterior predictive from ADVI fit of Mixture Desnity Model...')
+    pred_mdn = pm.sample_ppc(trace_mdn, model=model_mdn)
+    vartbl['pred_mdn'] = pred_mdn
+    save_vartbl(vartbl, fname)
+    
+# Extract y_pred as an array; shape (num_samples, N)
+y_pred = pred_mdn['y_obs']
+# Mean and standard deviation of y
+y_mean = np.mean(y_pred, axis=0)
+y_std = np.std(y_pred, axis=0)
+
+fig = plot_post_mean_std(x, y_mean, y_std, 'Mixture Density Model: Posterior Means +/- 1 SD')
+# ax = fig.axes[0]
+
+# *************************************************************************************************
+# C3: Plot the "mean" regression curves (similar to B3 and A3). 
+# Do the "mean" regression curves in this model look the same from those in Part B? 
+# If they differ why so?
