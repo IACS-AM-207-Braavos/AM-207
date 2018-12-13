@@ -178,6 +178,26 @@ def plot_elbo(elbo, plot_step, title):
     ax.grid()
     return fig
 
+
+def plot_elbo_log(elbo, plot_step, title):
+    """Generate the ELBO plot"""
+    fig, ax = plt.subplots(figsize=[12,8])
+    ax.set_title(title)
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('Log ELBO')
+    n = len(elbo)
+    plot_x = np.arange(0,n,plot_step)
+    # Un-normalized data points
+    y = elbo[::plot_step]
+    y_max = np.max(y)
+    # Shift to maximum value of y is -1
+    y = y - y_max - 1.0
+    # Plot - log(-y)
+    plot_y = -np.log(-y)
+    ax.plot(plot_x, plot_y, color='b')
+    ax.grid()
+    return fig
+
 # Plot the ELBO
 fig = plot_elbo(-advi.hist, 10, 'ELBO for ADVI Fit of Gaussian Mixture Model')
 plt.close(fig)
@@ -734,10 +754,10 @@ with pm.Model() as model_det:
     weight_val = softmax(weight_z)
     # Save weight as a column vector
     weight = pm.Deterministic('weight', weight_val)
-    # Noise vector; so the model has something to train
-    noise = pm.Normal('noise', mu=0.0, sd=1.0, shape=(N,1))
+    # "tune" mu so the model has something to train
+    mu_tune = pm.Normal('noise', mu=0.0, sd=1.0, shape=(N,K))
     
-    y_obs = pm.NormalMixture('y_obs', w=weight, mu=tt.add(mu, noise), sd=sigma, observed=y)
+    y_obs = pm.NormalMixture('y_obs', w=weight, mu=tt.add(mu, mu_tune), sd=sigma, observed=y)
     
 # Number of iterations for test model
 num_iters_det = 100000
@@ -829,9 +849,7 @@ plt.close(fig)
 
 
 # *************************************************************************************************
-# after the warm-up, ready for the race...
-
-# pymc3 model for neural network
+# after the warm-up, ready for the main event...
 with pm.Model() as model_mdn:
     """Mixture Density Network model"""
     # The number of data points
@@ -844,8 +862,8 @@ with pm.Model() as model_mdn:
     xr = x.reshape((1,N))
     
     # Priors for standard deviations of weights and biases in the network
-    sd_w: float = 1E-8
-    sd_b: float = 1E-8
+    sd_w: float = 2.0E-3
+    sd_b: float = 2.0E-3
     
     # Input weights; shape (20, 1)
     # w_in_a1 = network_wts['z_w'].reshape((num_hidden,1))
@@ -874,9 +892,10 @@ with pm.Model() as model_mdn:
     # mu = w*a1 + b
     mu_val = tt.add(pm.math.dot(w_a1_mu, a1), b_a1_mu)
     # tune mu; helps training by absorbing the noise that was added to the data    
-    mu_tune = pm.Normal('mu_tune', mu=0.0, sd=0.02, shape=(K,N))
+    # mu_tune = pm.Normal('mu_tune', mu=0.0, sd=0.02, shape=(K,N))
     # Save mu in the "normal" orientation as a column vector
-    mu = pm.Deterministic('mu', tt.add(mu_val.T, mu_tune.T))
+    # mu = pm.Deterministic('mu', tt.add(mu_val.T, mu_tune.T))
+    mu = pm.Deterministic('mu', mu_val.T)
     
     # weight for log_sigma
     # w_a1_log_sigma = network_wts['log_sigma_w']
@@ -921,9 +940,8 @@ with pm.Model() as model_mdn:
 # *************************************************************************************************
 # Fit this model
 # Number of iterations for ADVI fit of mixture density network
-num_iters_mdn: int = 40000
+num_iters_mdn: int = 50000
 try:
-    raise ValueError
     advi_mdn = vartbl['advi_mdn']
     print(f'Loaded ADVI fit for Mixture Density Model.')
 except:
@@ -936,6 +954,7 @@ except:
 
 # Plot the ELBO
 fig = plot_elbo(-advi_mdn.hist[:], 100, 'ELBO for ADVI Fit of Mixture Density Model')
+fig = plot_elbo_log(-advi_mdn.hist[:], 100, 'log ELBO for ADVI Fit of Mixture Density Model')
 display(fig)
 plt.close(fig)
 
@@ -947,7 +966,6 @@ plt.close(fig)
 
 # Draw parameter samples (trace)
 try:
-    raise ValueError
     trace_mdn = vartbl['trace_mdn']
     print(f'Loaded trace from ADVI fit of Mixture Density Model.')
 except:
@@ -956,8 +974,6 @@ except:
     vartbl['trace_mdn'] = trace_mdn
     save_vartbl(vartbl, fname)
 
-# Trace summary for the mixture density network
-summary_mdn = pm.summary(trace_mdn)
 
 # Extract mu, sigma, and weight for posterior sampling with clusters
 weight_mdn = trace_mdn['weight']
@@ -978,10 +994,9 @@ fig = plot_post_cluster(x_pp_mdn, y_pp_mdn, cluster_mdn, x, y, 'Posterior Predic
 display(fig)
 plt.close(fig)
 
-# fig = plot_post_cluster(x_pp_det, y_pp_det, cluster_det, x, y, 'Posterior Predictive: Deterministic Model')
+# Trace summary for the mixture density network
+summary_mdn = pm.summary(trace_mdn)
 
-
-# debug bad chart of posterior predictive - why junk?
 
 def debug_posteriors(trace_det, trace_mdn):
     """Generate series of charts to debug posterior """
@@ -1007,7 +1022,7 @@ def debug_posteriors(trace_det, trace_mdn):
     mean_weight_det = np.mean(weight_det, axis=0)
     mean_weight_mdn = np.mean(weight_mdn, axis=0)
     
-    fig = plot_weights(x, mean_weight_det, 'Mean Weights: DET')
+    plot_weights(x, mean_weight_det, 'Mean Weights: DET')
     plot_weights(x, mean_weight_mdn, 'Mean Weights: MDN')
     
     # Check cluster means
@@ -1029,27 +1044,6 @@ def debug_posteriors(trace_det, trace_mdn):
     plot_post_cluster(x_pp_mdn, y_pp_mdn, cluster_mdn, x, y, 'Posterior Predictive: Mixture Density Model')
 
 
-#    # Draw posterior predictive
-#    # See lecture 24, p. 33 for example
-#    try:
-#        pred_mdn = vartbl['pred_mdn']
-#        print(f'Loaded posterior predictive from ADVI fit of Mixture Density Model.')
-#    except:
-#        print(f'Drawing posterior predictive from ADVI fit of Mixture Density Model...')
-#        pred_mdn = pm.sample_ppc(trace_mdn, model=model_mdn)
-#        vartbl['pred_mdn'] = pred_mdn
-#        save_vartbl(vartbl, fname)
-#        
-#    # Extract y_pred as an array; shape (num_samples, N)
-#    y_pred = pred_mdn['y_obs']
-#    # Mean and standard deviation of y
-#    y_mean = np.mean(y_pred, axis=0)
-#    y_std = np.std(y_pred, axis=0)
-#    
-#    fig = plot_post_mean_std(x, y_mean, y_std, 'Mixture Density Model: Posterior Means +/- 1 SD')
-#    
-
-
 # *************************************************************************************************
 # C3: Plot the "mean" regression curves (similar to B3 and A3). 
 # Do the "mean" regression curves in this model look the same from those in Part B? 
@@ -1057,3 +1051,34 @@ def debug_posteriors(trace_det, trace_mdn):
 
 # Standardize the identities of the three Guassians for consistent colors
 # mu, sigma, weight, idx = standardize_gaussians(mu_mean, sigma_mean, weight_mean)
+
+# Draw posterior predictive
+# See lecture 24, p. 33 for example
+try:
+    pred_mdn = vartbl['pred_mdn']
+    print(f'Loaded posterior predictive from ADVI fit of Mixture Density Model.')
+except:
+    print(f'Drawing posterior predictive from ADVI fit of Mixture Density Model...')
+    pred_mdn = pm.sample_ppc(trace_mdn, model=model_mdn)
+    vartbl['pred_mdn'] = pred_mdn
+    save_vartbl(vartbl, fname)
+    
+# Extract y_pred as an array; shape (num_samples, N)
+y_pred = pred_mdn['y_obs']
+# Mean and standard deviation of y
+y_mean = np.mean(y_pred, axis=0)
+y_std = np.std(y_pred, axis=0)
+
+# Mean of posterior predictive with envelope
+fig = plot_post_mean_std(x, y_mean, y_std, 'Mixture Density Model: Posterior Means +/- 1 SD')
+    
+# Compute posterior means from the trace, which includes the intermediate results for mu, sigma, and weight
+mu = np.mean(trace_mdn['mu'], axis=0)
+sigma = np.mean(trace_mdn['sigma'], axis=0)
+weight = np.mean(trace_mdn['weight'], axis=0)
+
+# Standardize the identities of the three Guassians for consistent colors
+mu, sigma, weight, idx = standardize_gaussians(mu, sigma, weight)
+
+# Generate plot similar to one in the problem
+fig = plot_gaussians(x, mu, sigma, x, y, 'Mixture Density Model: 3 Gaussians')
