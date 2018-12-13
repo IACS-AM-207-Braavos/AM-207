@@ -844,40 +844,51 @@ with pm.Model() as model_mdn:
     xr = x.reshape((1,N))
     
     # Priors for standard deviations of weights and biases in the network
-    sd_w: float = 0.01
-    sd_b: float = 0.01
+    sd_w: float = 1E-8
+    sd_b: float = 1E-8
     
     # Input weights; shape (20, 1)
+    # w_in_a1 = network_wts['z_w'].reshape((num_hidden,1))
     w_in_a1_mu = network_wts['z_w'].reshape((num_hidden,1))
-    # w_in_a1_noise = pm.Normal('w_in_a1_noise', mu=0.0, sd=sd_w, shape=(num_hidden,1))
-    # w_in_a1 = pm.Deterministic('w_in_a1', tt.add(w_in_a1_mu, w_in_a1_noise))
-    w_in_a1 = pm.Normal('w_in_a1', mu=w_in_a1_mu, sd=sd_w, shape=(num_hidden,1))
+    w_in_a1 = pm.Normal('w_in_a1', mu=w_in_a1_mu, sd=sd_w, shape=w_in_a1_mu.shape)
     
     # Input bias; shape (20, 1)
+    # b_in_a1 = network_wts['z_b'].reshape((num_hidden,1))
     b_in_a1_mu = network_wts['z_b'].reshape((num_hidden,1))
-    # b_in_a1_noise = pm.Normal('b_in_a1_noise', mu=0.0, sd=sd_b)
-    # b_in_a1 = pm.Deterministic('b_in_a1', tt.add(b_in_a1_mu, b_in_a1_noise))
-    b_in_a1 = pm.Normal('b_in_a1', mu=b_in_a1_mu, sd=sd_b, shape=(num_hidden,1))
+    b_in_a1 = pm.Normal('b_in_a1', mu=b_in_a1_mu, sd=sd_b, shape=b_in_a1_mu.shape)
 
     # z1 = wx+b; sizes (20,1)*(1,N) = (20,N)
     z1 = tt.add(pm.math.dot(w_in_a1, xr), b_in_a1)
     a1 = pm.math.tanh(z1)
     
     # weights for mu have shape (3,20); (3,20) * (20,N) = (3, N)
-    w_a1_mu = network_wts['mu_w']
+    # w_a1_mu = network_wts['mu_w']
+    w_a1_mu_mu = network_wts['mu_w']
+    w_a1_mu = pm.Normal('w_a1_mu', mu=w_a1_mu_mu, sd=sd_w, shape=w_a1_mu_mu.shape)
 
     # bias for mu have shape (3,1)
-    b_a1_mu = network_wts['mu_b'].reshape((K,1))
+    # b_a1_mu = network_wts['mu_b'].reshape((K,1))
+    b_a1_mu_mu = network_wts['mu_b'].reshape((K,1))
+    b_a1_mu = pm.Normal('b_a1_mu', mu=b_a1_mu_mu, sd=sd_b, shape=b_a1_mu_mu.shape)
+
     # mu = w*a1 + b
     mu_val = tt.add(pm.math.dot(w_a1_mu, a1), b_a1_mu)
-    # tune mu
+    # tune mu; helps training by absorbing the noise that was added to the data    
     mu_tune = pm.Normal('mu_tune', mu=0.0, sd=0.02, shape=(K,N))
     # Save mu in the "normal" orientation as a column vector
     mu = pm.Deterministic('mu', tt.add(mu_val.T, mu_tune.T))
     
-    # log_sigma analogous to mu
-    w_a1_log_sigma = network_wts['log_sigma_w']
-    b_a1_log_sigma = network_wts['log_sigma_b'].reshape((K,1))
+    # weight for log_sigma
+    # w_a1_log_sigma = network_wts['log_sigma_w']
+    w_a1_log_sigma_mu = network_wts['log_sigma_w']
+    w_a1_log_sigma = pm.Normal('w_a1_log_sigma', mu=w_a1_log_sigma_mu, sd=sd_w, shape=w_a1_log_sigma_mu.shape)
+
+    # bias for log_sigma
+    # b_a1_log_sigma = network_wts['log_sigma_b'].reshape((K,1))
+    b_a1_log_sigma_mu = network_wts['log_sigma_b'].reshape((K,1))
+    b_a1_log_sigma = pm.Normal('b_a1_log_sigma', mu=b_a1_log_sigma_mu, sd=sd_b, shape=b_a1_log_sigma_mu.shape)
+    
+    # log_sigma = w*a1 + b
     log_sigma = tt.add(pm.math.dot(w_a1_log_sigma, a1), b_a1_log_sigma)
     
     # sigma from log_sigma
@@ -885,23 +896,32 @@ with pm.Model() as model_mdn:
     # save sigma as a column vector
     sigma = pm.Deterministic('sigma', sigma_val.T)
     
-    # weight_z analogous to mu and log_sigma
-    w_a1_weight_z = network_wts['weight_z_w']
-    b_a1_weight_z = network_wts['weight_z_b'].reshape((K,1))
+    # weight_z is the intermediate results that is fed into the softmax to get the cluster weights
+    # weight for weight_z
+    # w_a1_weight_z = network_wts['weight_z_w']
+    w_a1_weight_z_mu = network_wts['weight_z_w']
+    w_a1_weight_z = pm.Normal('w_a1_weight_z', mu=w_a1_weight_z_mu, sd=sd_w, shape=w_a1_weight_z_mu.shape)
+    
+    # bias for weight_z
+    # b_a1_weight_z = network_wts['weight_z_b'].reshape((K,1))
+    b_a1_weight_z_mu = network_wts['weight_z_b'].reshape((K,1))
+    b_a1_weight_z = pm.Normal('b_a1_weight_z', mu=b_a1_weight_z_mu, sd=sd_b, shape=b_a1_weight_z_mu.shape)
+    
+    # mixing weight = w*a1 + b
     weight_z = tt.add(pm.math.dot(w_a1_weight_z, a1), b_a1_weight_z).T
     
     # weight from weight_z
     weight_val = softmax(weight_z)
     # Save weight as a column vector
     weight = pm.Deterministic('weight', weight_val)
-    
+    # Sample from a normal mixture model and compare to observed data points
     y_obs = pm.NormalMixture('y_obs', w=weight, mu=mu, sd=sigma, observed=y)
 
 
 # *************************************************************************************************
 # Fit this model
 # Number of iterations for ADVI fit of mixture density network
-num_iters_mdn: int = 20000
+num_iters_mdn: int = 40000
 try:
     raise ValueError
     advi_mdn = vartbl['advi_mdn']
@@ -918,77 +938,6 @@ except:
 fig = plot_elbo(-advi_mdn.hist[:], 100, 'ELBO for ADVI Fit of Mixture Density Model')
 display(fig)
 plt.close(fig)
-
-# *************************************************************************************************
-with pm.Model() as model_mdn_OLD:
-    # The number of data points
-    N: int = len(x)
-    # The number of gaussians
-    K: int = 3
-    # The number of hidden units
-    num_hidden: int = 20
-
-    # Priors for standard deviations of weights and biases in the network
-    sd_w: float = 0.01
-    sd_b: float = 0.01
-    
-    # Weights from input to hidden layer; reshape input weights to (20, 1)
-    w_in_a1_mu = network_wts['z_w'].reshape((num_hidden,1))
-    w_in_a1 = pm.Normal('w_in_a1', mu=w_in_a1_mu, sd=sd_w,  shape=(num_hidden, 1))
-    b_in_a1_mu = network_wts['z_b'].reshape((num_hidden,1))
-    b_in_a1 = pm.Normal('b_in_a1', mu=b_in_a1_mu, sd=sd_b, shape=(num_hidden, 1))
-
-    # Weights from hidden layer to mu
-    w_a1_mu_mu = network_wts['mu_w']
-    w_a1_mu = pm.Normal('w_a1_mu', mu=w_a1_mu_mu, sd=sd_w, shape=(K, num_hidden))
-    b_a1_mu_mu = network_wts['mu_b'].reshape((K,1))
-    b_a1_mu = pm.Normal('b_a1_mu', mu=b_a1_mu_mu, sd=sd_b, shape=(K, 1))
-
-    # Weights from hidden layer to log_sigma
-    w_a1_log_sigma_mu = network_wts['log_sigma_w']
-    # w_a1_log_sigma = pm.Normal('w_a1_log_sigma', mu=w_a1_log_sigma_mu, sd=sd_w, shape=(K, num_hidden))
-    b_a1_log_sigma_mu = network_wts['log_sigma_b'].reshape((K,1))
-    # b_a1_log_sigma = pm.Normal('b_a1_log_sigma', mu=b_a1_log_sigma_mu, sd=sd_b, shape=(K, 1))
-
-    w_a1_log_sigma = network_wts['log_sigma_w']
-    b_a1_log_sigma = network_wts['log_sigma_b'].reshape((K,1))
-
-    # Weights from hidden layer to mixing weights    
-#    w_a1_weight_z = pm.Normal('w_a1_weight_z', mu=init_w_a1_weight_z, sd=sd_w, shape=(K, num_hidden))
-#    b_a1_weight_z = pm.Normal('b_a1_weight_z', mu=init_b_a1_weight_z, sd=sd_b, shape=(K, 1))
-
-    w_a1_weight_z = network_wts['weight_z_w']
-    b_a1_weight_z = network_wts['weight_z_b'].reshape((K,1))
-    
-    # Reshape x to a 1xN row vector
-    xr = x.reshape((1,N))    
-    # z1 is the output of the linear layer applied to the input; this is fed to the activation function
-    # z1 = wx + b; sizes (20,1) * (1,N) = (20,N)
-    z1 = tt.add(pm.math.dot(w_in_a1, xr), b_in_a1)
-    # Activation a1 is tanh of z1
-    a1 = pm.math.tanh(z1)
-    
-    # Mu is linear in the activation
-    mu_val = tt.add(pm.math.dot(w_a1_mu, a1), b_a1_mu)
-    # Save mu in the "normal" orientation as a column vector
-    mu = pm.Deterministic('mu', mu_val.T)
-
-    # Log Sigma is linear in the activation; sigma is exp of this plus the shift
-    log_sigma = tt.add(pm.math.dot(w_a1_log_sigma, a1), b_a1_log_sigma)
-    # sigma from log_sigma
-    sigma_val = tt.add(pm.math.exp(log_sigma), sigma_shift)
-    # Save sigma as a column vector
-    sigma = pm.Deterministic('sigma', sigma_val.T)
-
-    # Weights are softmax applied to linear of a1
-    # This must be transformed to the "normal" NxK orientation so softmax behaves expected below!
-    weight_z = tt.add(pm.math.dot(w_a1_weight_z, a1), b_a1_weight_z).T
-    # Save the weights as a column vector
-    weight_val = softmax(weight_z)
-    weight = pm.Deterministic('weight', weight_val)
-   
-    # Sample points using a pymc3 NormalMixture
-    y_obs = pm.NormalMixture('y_obs', w=weight, mu=mu, sd=sigma, observed=y)
 
 # *************************************************************************************************
 # C2: Sample from the posterior predictive and produce a diagram like B4 and A5 for this model. 
