@@ -210,9 +210,8 @@ def metropolis(logp, proposal, step_size, num_samples, X_init):
 # The log-probability function
 def logp(X: np.array):
     """Log probability at this point"""
-    # unpack array X into scalars (x, y)
-    (x, y) = X
-    return log(p(x, y))
+    # Dispatch call to vectorized pdf f(X) for efficiency
+    return log(f(X))
 
 
 # Crate a proposal distribution with sigma=1 as per problem statement
@@ -295,7 +294,7 @@ def plot_path(samples, x_grid, y_grid, p_grid, title):
     fig, ax = plot_contour(x_grid, y_grid, p_grid, title)
     ax.set_title(title)
     # Add path of sample points
-    ax.plot(x, y, color='r', linewidth=1, marker='o', markersize=2.5, alpha=0.25)
+    ax.plot(x, y, color='r', linewidth=1, marker='o', markersize=2.5, alpha=0.25, label='path')
     return fig
 
 
@@ -336,11 +335,6 @@ def plot_cloud(samples, x_grid, y_grid, p_grid, title):
 # *************************************************************************************************
 # B1 In line with A1, visualize modified pdfs (dont worry about normalization) 
 # by setting the temperatures to  𝑇=10  and  𝑇=0.1 .
-
-#    def E(X: np.ndarray):
-#        """Energy function for this problem"""
-#        return -logp(X)
-
 
 def logp_temp(X: np.ndarray, T: float):
     """log probability function with a temperature parameter T"""
@@ -590,7 +584,7 @@ def parallel_temper(pdf: Callable, temps: np.ndarray, X_init, L: int, epochs: in
     assert temps[idx_t0] == 1.0, 'Error: one of the temps must be 1.0!'
     
     # Bind arguments with the PDF and L to metropolis_temp
-    make_chain = lambda X_start, T : metropolis_temp(pdf, T, L, X_start)
+    make_chain = lambda X_init, T : metropolis_temp(pdf, T, L, X_init)
     # Save range of i's for legibility
     ii = range(num_chains)    
     # Initialize X_inits
@@ -639,9 +633,170 @@ except:
     vartbl['samples_pt'] = samples_pt
     save_vartbl(vartbl, fname)
 
-
-
 # *************************************************************************************************
 # C3. How do your samples in C2 compare to those of the Metropolis sampler? 
 # How do they compare to the samples generated from the Gaussian Mixture approximation of f(x)?
 
+# See notebook
+    
+# *************************************************************************************************
+# Part D. Global Optima using Simulated Annealing
+# We have new-found intuition about how to use temperature to improve our sampling. 
+# Lets now tackle the inverse idea: what happens if you sample at a lower temperature than 1. 
+# Our visualizations from Part B should indicate to us that the distributions 
+# become extremely tightly peaked arounnd their maxima.
+
+# If we initialized a metropolis-hastings sampler around an optimum at a really low temperature, 
+# it would find us a local minimum. But if we had a higher temperature at the beginning, we can use 
+# Metropolis-Hastings sampling at high temperatures to travel around the distribution and 
+# find all the peaks (valleys). Then we will slowly cool down the temperature (which will allow us 
+# to escape local optima at higher temperatures) and finally focus us into a particular optimum region 
+# and allow you to find the optimum. It can be shown that for ceratin temperture schedules this method 
+# is guaranteed to find us a global minimum in the limit of infinite iterations.
+
+# We'll use this methd to find the global minimum of our distribution. 
+# The algorithm is as follows. Now we have only one chain, but we very slowly dial down its temperature to below T=1.
+
+# Initialize  (𝑥,𝑦)𝑖,𝑇,𝐿(𝑇)  where  𝐿  is the number of iterations at a particular temperature.
+# Perform  𝐿  transitions thus(we will call this an epoch):
+# Generate a new proposed position  (𝑥,𝑦)∗  using 2 independent gaussians with  𝜎=1 .
+# If  (𝑥,𝑦)∗  is accepted (according to probability  𝑃=𝑒(−Δ𝐸/𝑇) , set  (𝑥,𝑦)𝑖+1=(𝑥,𝑦)∗ , else set  (𝑥,𝑦)𝑖+1=𝑥𝑖 
+# Update T and L
+# Until some fixed number of epochs, or until some stop criterion is fulfilled, goto 2.
+# Δ𝐸  is the change in enery, or the change in the negative log of the probability function. 
+# That is,  𝐸=−𝑙𝑜𝑔𝑝(𝑥,𝑦) . For a given T and L, this is just Metropolis!
+
+# This algorithm is called simulated annealing and we'll use it to find the global maximum for  𝑓(𝑋) 
+# D1. Use simulated annealing with a cooling schedule of 𝑇𝑘+1=0.98𝑇𝑘 and 
+# a L(T) defined initially at 100 with  𝐿𝑘+1=1.2𝐿𝑘  to find the global optima for 𝑝(𝑥,𝑦). 
+# Plot  𝐸(𝑥,𝑦)  vs iterations. 
+# Given how we constructed  𝑝(𝑥,𝑦)  it should be fairly straight-forward to observe 
+# the true optima by inspection. 
+# How does the optima found by SA compare to the true optima?
+
+def E(X: np.ndarray):
+    """Energy function for this problem"""
+    return -logp(X)
+
+
+def anneal(f: Callable, X_init, T0 : float, L0: int, num_iters: int):
+    """
+    Simulated annealing algorithm:
+    f:      function to optimize
+    X_init: starting point
+    T0:     initial temperature
+    L0:     initial chain size
+    epochs: number of epochs to run
+    """
+    # shape of data
+    K: int = X_init.shape[0]
+    # growth factor in iterations per epoch
+    gL = 1.20
+    # growth factor in termperature per epoch
+    gT = 0.98
+    # compute number of iterations in closed form using geometric series
+    epochs = int(np.ceil(log(1.0 + (num_iters / L0) * (gL-1.0)) / log(gL)))
+    # Length of each epoch
+    epoch_lens = np.array([np.round(L0*(gL**k)) for k in range(epochs)], dtype=np.int32)
+    # Cumulative iteration counter
+    iter_counter = np.minimum(np.concatenate([np.zeros(1, dtype=np.int32), np.cumsum(epoch_lens)]), num_iters)
+    # Adjust last epoch length to reflect truncation
+    epoch_lens[-1] = iter_counter[-1] - iter_counter[-2]
+    # Check that epoch_lens calculation was done correctly
+    assert iter_counter[-2] < num_iters and num_iters == iter_counter[-1]
+    # Generate temperature schedule
+    temps = np.array([T0 * (gT**k) for k in range(epochs)])
+    # Bind arguments with the PDF and L to metropolis_temp
+    make_segment = lambda X_init, T, L : metropolis_temp(f, T, L, X_init)
+    
+    # Initialize path and energy arrays
+    path = np.zeros((num_iters,K))
+    energy = np.zeros(num_iters)
+    
+    # iterate over epochs
+    for k in range(epochs):
+        # Get indices for this chain in the big arrays
+        i0: int = iter_counter[k+0]
+        i1: int = iter_counter[k+1]
+        # Temperature and number of iterations for this epoch
+        T = temps[k]
+        L = epoch_lens[k]
+        # Generate one segment on the path; same as a chain in sampling context
+        segment = make_segment(X_init, T, L)
+        # Add this segment to the full path
+        path[i0:i1] = segment
+        # Save energies along this segment
+        energy[i0:i1] = E(segment)
+        # Set X_init for the next segment at the last value on this segment
+        X_init = segment[-1]
+
+    # Return both the samples and the energy function
+    return path, energy
+
+# Set parameters for simulated annealing
+T0: float = 1.0
+L0: int = 100
+num_iters_anneal: int = 200000
+
+# Find the global minimum with simulated annealing
+try:
+    # raise ValueError
+    anneal_path = vartbl['anneal_path']
+    anneal_energy = vartbl['anneal_energy']
+    print(f'Loaded path and energy for simulated annealing.')
+except:
+    # Run simulated annealing for 100000 iterations
+    print(f'Running simulated annealing for {num_iters_anneal} iterations...')
+    anneal_path, anneal_energy = anneal(f, X_init, T0, L0, num_iters_anneal)
+    vartbl['anneal_path'] = anneal_path
+    vartbl['anneal_energy'] = anneal_energy
+    save_vartbl(vartbl, fname)
+
+
+def anneal_plot(path, energy):
+    """Plot the path and report results of simulated annealing process"""
+    # Report the local minimum found
+    X_min_anneal = path[-1]
+    E_min_anneal = energy[-1]
+    print(f'Simulated Annealing found local min at ({X_min_anneal[0]:0.4f}, {X_min_anneal[1]:0.4f}) '
+          f'with energy {E_min_anneal:0.4f}')
+    
+    print(f'True local minimum is at ({mu_1[0]:0.4f}, {mu_1[1]:0.4f}) '
+          f'with energy {E(mu_1):0.4f}')
+    
+    # Plot the path of simulated annealing
+    fig = plot_path(path[::], x_grid, y_grid, p_grid, 'Simulated Annealing Path')
+    ax = fig.axes[0]
+    ax.plot(X_min_anneal[0], X_min_anneal[1], label='Anneal Min', marker='d', color='b', markersize=20)
+    ax.plot(mus[:,0], mus[:,1], label='True Mins', linewidth=0, marker='+', color='k', 
+            markersize=20, markeredgewidth=5)
+    ax.legend()
+    return fig
+
+# Plot the annealing path and report the results
+fig = anneal_plot(anneal_path, anneal_energy)
+
+
+def plot_energy(anneal_energy):
+    """Plot the energy during the annealing process"""
+    # Cumulative minimum energy from annealing
+    cum_min = np.minimum.accumulate(anneal_energy)
+    plot_step: int = 100
+    xx = np.arange(0,num_iters_anneal,plot_step) // 1000
+    # Plot the energy
+    fig, ax = plt.subplots(figsize=[12,8])
+    ax.set_title('Energy vs. Iteration Number During Simulated Annealing')
+    ax.set_xlabel('Number of Iterations (thousand)')
+    ax.set_ylabel('Energy')
+    ax.set_ylim(2,6)
+    h1 = ax.plot(xx, anneal_energy[::plot_step], label='Anneal', color='b', linewidth=0, marker='.', markersize=2)
+    h2 = ax.plot(xx, cum_min[::plot_step], label='CumMin', color='k', linewidth=4)
+    h3 = ax.axhline(E(mu_1), label='LocalMin_1', color='r')
+    ax.axhline(E(mu_2), label='LocalMin_2', color='r')
+    ax.axhline(E(mu_3), label='LocalMin_3', color='r')
+    ax.legend(handles=[h1[0], h2[0], h3], labels=['Anneal', 'CumMin', 'LocalMin'], loc='upper right')
+    ax.grid()
+    return fig
+
+# Plot the annealing energy
+fig = plot_energy(anneal_energy)
