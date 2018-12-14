@@ -42,9 +42,9 @@ def arange_inc(x: float, y: float = None, z: float = None) -> np.ndarray:
     elif z is None:
         (start, stop, step) = (x, y + 1, 1)
     elif z > 0:
-        (start, stop, step) = (x, y + 1, z)
+        (start, stop, step) = (x, y + z, z)
     elif z < 0:
-        (start, stop, step) = (x, y - 1, z)
+        (start, stop, step) = (x, y - z, z)
     return np.arange(start, stop, step)
 
 
