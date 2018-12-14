@@ -7,6 +7,7 @@ Thu Dec 13 16:05:11 2018
 import numpy as np
 from numpy import log, exp
 import scipy.stats
+from scipy.stats import multivariate_normal
 # probability
 import pymc3 as pm
 # plotting
@@ -155,19 +156,19 @@ fig = plot_contour(x_grid, y_grid, p_grid, 'Contours of $p(x, y)$')
 # A pathplot is just your samples trace overlaid on your pdf, so that you can see how the sampler traversed. 
 
 # mu, sigma, and weight for Gaussian 1
-mu_1 = np.array([[12, 7]])
+mu_1 = np.array([12, 7])
 R_1 = make_cov(theta1)
 cov_1 = R_1 @ sigma1 @ R_1.T
 weight_1 = 1.0 / 2.5
 #    
 # mu, sigma, and weight for Gaussian 2
-mu_2 = np.array([[-1, 6]])
+mu_2 = np.array([-1, 6])
 R_2 = make_cov(theta2)
 cov_2 = R_2 @ sigma2 @ R_2.T
 weight_2 = 1.0 / 2.5
 
 # mu, sigma, and weight for Gaussian 3
-mu_3 = np.array([[3, -2]])
+mu_3 = np.array([3, -2])
 R_3 = make_cov(theta3)
 cov_3 = R_3 @ sigma3 @ R_3.T
 weight_3 = 0.5 / 2.5
@@ -224,7 +225,7 @@ num_samples: int = 20000
 K: int = 2
 
 # Set the starting point as the weighted average of the clusters
-X_init = np.average(mus, axis=0, weights=weights).squeeze()
+X_init = np.average(mus, axis=0, weights=weights)
 # Set the stepsize to 1
 step_size = 1.0
 # Set tuning and thinning
@@ -426,13 +427,16 @@ save_vartbl(vartbl, fname)
 
 
 def plots_one_temp(T):
-    """Genereate all three plots of interest at one temperature"""
+    """Generate all three plots of interest at one temperature"""
+    # Get the trace for this temperature
+    trace_T = {'x': samples_by_temp[T][:,0],
+               'y': samples_by_temp[T][:,1]}
     # Generate the traceplot
-    fig1 = plot_trace(trace, f'Trace Plot of x and y at temp. {T}')
+    fig1 = plot_trace(trace_T, f'Trace Plot of x and y at temp. {T}')
     # Generate the autocorr plot
-    fig2 = plot_autocorr(trace, f'Autocorrelation Plot of x and y at temp. {T}')
+    fig2 = plot_autocorr(trace_T, f'Autocorrelation Plot of x and y at temp. {T}')
     # Plot the path taken by the sampler
-    fig3 = plot_path(samples, x_grid, y_grid, p_grid_by_temp[T], 
+    fig3 = plot_path(samples_by_temp[T], x_grid, y_grid, p_grid_by_temp[T], 
                     f'Path Plot for Metropolis Samples @ temp. {T}')
     return [fig1, fig2, fig3]
 
@@ -446,32 +450,30 @@ for T in temps:
 # How do the histograms compare with the histograms for the samples from  𝑓(𝑋)  at each temperature. 
 # At what temperature do the samples best represent the function?
 
-# *************************************************************************************************
-#    # PDF for this multivariate normal as a standalone distribution; see https://docs.pymc.io/prob_dists.html
-#    pdf_1 = pm.MvNormal.dist(mu=mu_1.reshape(2,1), cov=cov_1)
-#    pdf_2 = pm.MvNormal.dist(mu=mu_2, cov=cov_2)
-#    pdf_3 = pm.MvNormal.dist(mu=mu_3, cov=cov_3)
-#    # pdf = pm.Mixture.dist(weight, [pdf_1, pdf_2, pdf_3])
-#    
-#    class MvNormalMixture(pm.Continuous):
-#        """Wrapper for a MV normal mixture"""
-#        # See https://docs.pymc.io/prob_dists.html, section "Custome distributions"
-#        
-#        def __init__(self, ws, mus, covs):
-#            # check number of data points
-#            T = len(ws)
-#            assert len(mus) == T
-#            assert len(covs) == T
-#            self.ws = ws
-#            self.mus = mus
-#            self.covs = covs
-#            self.n = n
-#        
-#        def random(self, point=None, size=None):
-#            return random_samples
-#        
-#        def logp(self, value):
-#            return total_log_prob
-#        
-#            self.n = len(ws)
+# Draw a matrix of samples from all three Guassians
+samples_1 = multivariate_normal(mean=mu_1, cov=cov_1).rvs(num_samples)
+samples_2 = multivariate_normal(mean=mu_2, cov=cov_2).rvs(num_samples)
+samples_3 = multivariate_normal(mean=mu_3, cov=cov_3).rvs(num_samples)
+# Stack the candidate samples; 
+samples_cand = np.stack([samples_1, samples_2, samples_3])
+
+# Sample ancestrally (first pick a Guassian, then use that column)
+cluster = np.random.choice(3, size=num_samples, p=weights)
+samples_gm = samples_cand[cluster,range(num_samples),:]
+
+
+
+def plots_gm(samples):
+    """Generate all three plots of interest from the Gaussian Mixture"""
+    # Get the trace for this temperature
+    trace = {'x': samples[:,0],
+             'y': samples[:,1]}
+    # Generate the traceplot
+    fig1 = plot_trace(trace, f'Trace Plot of x and y from Gaussian Mixture')
+    # Generate the autocorr plot
+    fig2 = plot_autocorr(trace, f'Autocorrelation Plot of x and y from Gaussian Mixture')
+    # Plot the path taken by the sampler
+    fig3 = plot_path(samples, x_grid, y_grid, p_grid, 
+                    f'Cloud Plot for Gaussian Mixture')
+    return [fig1, fig2, fig3]
 
