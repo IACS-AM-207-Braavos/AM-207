@@ -18,7 +18,7 @@ import arviz as az
 # misc
 import tqdm
 from am207_utils import load_vartbl, save_vartbl, arange_inc
-from typing import Dict
+from typing import List, Dict, Callable
 
 # *************************************************************************************************
 # Q3: Exploring Temperature in Sampling and Optimiztion
@@ -188,8 +188,9 @@ def metropolis(logp, proposal, step_size, num_samples, X_init):
     # Initialize X_prev to the initial point that was passed in
     X_prev = X_init
     accepted = 0
-    # Drap num_samples sample points
-    for i in tqdm.tqdm(range(num_samples)):
+    # Draw num_samples sample points
+    iterator_i = tqdm.tqdm(range(num_samples)) if num_samples > 1000 else range(num_samples)
+    for i in iterator_i:
         X_star = proposal(X_prev, step_size)
         logp_star = logp(X_star)
         logp_prev = logp(X_prev)
@@ -314,11 +315,11 @@ def plot_cloud(samples, x_grid, y_grid, p_grid, title):
     return fig
 
 # Generate the traceplot
-fig = plot_trace(trace, 'Trace Plot of x and y')
+# fig = plot_trace(trace, 'Trace Plot of x and y')
 # Generate the autocorr plot
-fig = plot_autocorr(trace, 'Autocorrelation Plot of x and y')
+# fig = plot_autocorr(trace, 'Autocorrelation Plot of x and y')
 # Plot the path taken by the sampler
-fig = plot_path(samples, x_grid, y_grid, p_grid, 'Path Plot for Metropolis Samples')
+# fig = plot_path(samples, x_grid, y_grid, p_grid, 'Path Plot for Metropolis Samples')
 
 # *************************************************************************************************
 # Part B: Changing pdfs using temperature
@@ -384,7 +385,8 @@ save_vartbl(vartbl, fname)
 temps_contour = np.array([0.1, 10.0])
 for T in temps_contour:
     # Build a contour plot at this temperature
-    plot_contour(x_grid, y_grid, p_grid_T, f'Contours of $p(x, y)$ at temperature T={T}')
+    # plot_contour(x_grid, y_grid, p_grid_T, f'Contours of $p(x, y)$ at temperature T={T}')
+    pass
 
 
 # *************************************************************************************************
@@ -441,7 +443,8 @@ def plots_one_temp(T):
     return [fig1, fig2, fig3]
 
 for T in temps:
-    figs = plots_one_temp(T)
+    # figs = plots_one_temp(T)
+    pass
 
 # *************************************************************************************************
 # B3. Approximate the 𝑓(𝑋) by the appropriate mixture of Gaussians 
@@ -461,19 +464,184 @@ samples_cand = np.stack([samples_1, samples_2, samples_3])
 cluster = np.random.choice(3, size=num_samples, p=weights)
 samples_gm = samples_cand[cluster,range(num_samples),:]
 
-
-
-def plots_gm(samples):
+def plots_all(samples, model_name):
     """Generate all three plots of interest from the Gaussian Mixture"""
     # Get the trace for this temperature
     trace = {'x': samples[:,0],
              'y': samples[:,1]}
     # Generate the traceplot
-    fig1 = plot_trace(trace, f'Trace Plot of x and y from Gaussian Mixture')
+    fig1 = plot_trace(trace, f'Trace Plot of x and y from {model_name}')
     # Generate the autocorr plot
-    fig2 = plot_autocorr(trace, f'Autocorrelation Plot of x and y from Gaussian Mixture')
+    fig2 = plot_autocorr(trace, f'Autocorrelation Plot of x and y from {model_name}')
     # Plot the path taken by the sampler
     fig3 = plot_path(samples, x_grid, y_grid, p_grid, 
-                    f'Cloud Plot for Gaussian Mixture')
+                    f'Path Plot for {model_name}')
     return [fig1, fig2, fig3]
+
+# *************************************************************************************************
+# Part C: Parallel Tempering
+# Now that we've seen some of the properties of sampling at higher temperatures, let's explore 
+# a way to incorporate the improved exploration of the entire pdf from sampling at higher temperatures 
+# while still getting samples that match our distribution. 
+# We'll use a technique called parallel tempering.
+# *************************************************************************************************
+
+# The general idea of parallel tempering is to simulate 𝑁 replicas of the original system of interest 
+# (in our case, a single Metropolis Hastings chain), each replica at a different temperature. 
+# The temperature of a Metropolis Hastings Markov Chain defines how likely 
+# it is to sample from a low-density  part of the target distribution. 
+# The high temperature systems are generally able to sample large volumes of parameter space, 
+# whereas low temperature systems, while having precise sampling in a local region of parameter space, 
+# may become trapped around local energy minima/probability maxima. 
+# Parallel tempering achieves good sampling by allowing the chains at different temperatures to 
+# exchange complete configurations. 
+# Thus, the inclusion of higher temperature chains ensures that the lower temperature chains can access 
+# all the low-temperature regions of phase space: the higher temperatures help these chains make the jump-over.
+
+# Here is the idea that you must implement.
+# There are 𝑁 replicas each at different temperatures 𝑇𝑖 that produce 𝑛 samples each before possibly swapping states.
+# We simplify matters by only swapping states at adjacent temperatures. 
+# The probability of swapping any two instances of the replicas is given by
+
+# 𝐴=min(1.0, p_k(
+# One of the 𝑇𝑖's in our set will always be 1 and this is 
+# the only replica that we use as output of the Parallel tempering algorithm.
+
+# An algorithm for Parallel Tempering is as follows:
+# Initialize the parameters {(𝑥𝑖𝑛𝑖𝑡,𝑦𝑖𝑛𝑖𝑡)𝑖},{𝑇𝑖},𝐿 where
+# 𝐿 is the number of iterations between temperature swap proposals.
+# {𝑇𝑖} is a list of temperatures. You'll run one chain at each temperature.
+# {(𝑥𝑖𝑛𝑖𝑡,𝑦𝑖𝑛𝑖𝑡)𝑖} is a list of starting points, one for each chain
+# For each chain (one per temperature) use the simple Metropolis code you wrote earlier. 
+# Perform 𝐿 transitions on each chain.
+# Set the {(𝑥𝑖𝑛𝑖𝑡,𝑦𝑖𝑛𝑖𝑡)𝑖} for the next Metropolis run on each chain to the last sample for each chain i.
+# Randomly choose 2 chains at adjacent temperatures.
+# Use the above formula to calculate the Acceptance probability 𝐴.
+# With probability 𝐴, swap the positions between the 2 chains (that is swap the 𝑥s of the two chains, 
+# and separately swap the 𝑦s of the chains .
+# Go back to 2 above, and start the next L-step epoch
+# Continue until you finish 𝑁𝑢𝑚.𝑆𝑎𝑚𝑝𝑙𝑒𝑠//𝐿 epochs.
+
+
+# *************************************************************************************************
+# C1. Explain why swapping states with the given acceptance probability is in keeping with detailed balance. 
+# in notebook
+
+
+# *************************************************************************************************
+# C2. Create a parallel tempering sampler that uses 5 chains at the temperatures {0.1, 1, 3, 7, 10} 
+# to sample from 𝑓(𝑥,𝑦). 
+# Choose a value of L around 10-20. 
+# Generate 10000 samples from 𝑓(𝑥,𝑦). 
+# Construct histograms of the marginals, traceplots, autocorrelation plots, and a pathplot for your samples.
+
+def metropolis_temp(pdf: Callable, T: float, num_samples: int, X_init: np.ndarray):
+    """Modified metropolis sampler that accept a pdf and temperature"""
+    # create p(X;T) in situ by binding T
+    logp_T = lambda X : log(pdf(X)) / T
+    # Draw samples
+    samples, accepted = metropolis(logp_T, proposal, step_size, num_samples, X_init)
+    # Only return the samples; discard number of accepted points
+    return samples
+
+
+def trans_prob(pdf, Xi: np.ndarray, Xj: np.ndarray, Ti: float, Tj: float):
+    """
+    Compute the transition probability A(i, j) between two states
+    pdf: probability density function taking vectorized input
+    Xi: the first point, corresponding to sampler with temperature Ti
+    Xj: the second point, corresponding to sampler with temperature Tj
+    Ti:  temperature of the first point, Ti
+    Tj:  temperature of the second pont, Tj
+    """
+    # Evaluate the basic probability (without temperature) at both points
+    pi = pdf(Xi)
+    pj = pdf(Xj)
+    # Compute the four probabilities appearing in the formula    
+    pi_xi = np.power(pi, 1.0 / Ti)
+    pi_xj = np.power(pi, 1.0 / Tj)
+    pj_xi = np.power(pj, 1.0 / Ti)
+    pj_xj = np.power(pj, 1.0 / Tj)
+    # Apply the formula for A
+    return min(1.0, (pi_xj * pj_xi) / (pi_xi * pj_xj))
+
+
+def swap_inits(X_inits: List[np.ndarray], i: int, j: int):
+    """Swap the states (initializers) for two chains"""
+    # Copy the starting states
+    init_i, init_j = X_inits[i].copy(), X_inits[j].copy()
+    # Swap them
+    X_inits[i] = init_j
+    X_inits[j] = init_i
+
+
+def parallel_temper(pdf: Callable, temps: np.ndarray, X_init, L: int, epochs: int):
+    """Parallel tempering algorithm"""
+    # Get the number of parallel chains
+    num_chains: int = len(temps)
+    # Shape of data
+    K: int = X_init.shape[0]
+    # Compute the total number of samples and preallocate space
+    # Will only save the results from the chain with temperature=1
+    num_samples: int = L * epochs
+    samples = np.zeros((num_samples, K))
+    # Get index of the chain with temperature T=1
+    idx_t0: int = np.searchsorted(temps, 1.0)
+    assert temps[idx_t0] == 1.0, 'Error: one of the temps must be 1.0!'
+    
+    # Bind arguments with the PDF and L to metropolis_temp
+    make_chain = lambda X_start, T : metropolis_temp(pdf, T, L, X_start)
+    # Save range of i's for legibility
+    ii = range(num_chains)    
+    # Initialize X_inits
+    X_inits = [X_init.copy() for i in ii]
+    # initialize over epochs
+    for epoch in tqdm.tqdm(range(epochs)):
+        # Run new chains
+        chains = [make_chain(X_inits[i], temps[i]) for i in ii]
+        # Copy output from chain at temp 0 to samples
+        i0: int = L*(epoch+0)
+        i1: int = L*(epoch+1)
+        samples[i0:i1] = chains[idx_t0]
+    
+        # Copy current states of each chain to X_starts
+        X_inits = [chain[-1] for chain in chains]
+        # Randomly choose a pair of adjacent chains; equivalent to picking k in [0, num_chains-1)
+        k = np.random.randint(num_chains-1)
+        # Extract Xi, Xj, Ti, Tj for transition probability
+        Xi = X_inits[k]
+        Xj = X_inits[k+1]
+        Ti = temps[k]
+        Tj = temps[k+1]
+        # Compute the transition probability
+        tp: float = trans_prob(pdf, Xi, Xj, Ti, Tj)
+        # Draw a random uniform to determine whether there is a transition
+        if np.random.random() < tp:
+            swap_inits(X_inits, k, k+1)
+
+    # Return only the "good" samples from the chain with temp-1
+    return samples
+        
+# Alias the vectorized probability desnity function for legibility
+pdf = f
+# Set parameters for paralllel tempering
+temps_pt = np.array([0.1, 1.0, 3.0, 7.0, 10.0])
+num_samples_pt: int = 10000
+L: int = 16
+epochs = int(np.ceil(num_samples_pt / L))
+# Run parallel tempering
+try:
+    samples_pt = vartbl['samples_pt']
+    print(f'Loaded {len(samples_pt)} samples from parallel tempering.')
+except:
+    print(f'Generating {num_samples_pt} samples with parallel tempering...')
+    samples_pt = parallel_temper(pdf, temps_pt, X_init, L, epochs)
+    vartbl['samples_pt'] = samples_pt
+    save_vartbl(vartbl, fname)
+
+
+
+# *************************************************************************************************
+# C3. How do your samples in C2 compare to those of the Metropolis sampler? 
+# How do they compare to the samples generated from the Gaussian Mixture approximation of f(x)?
 
